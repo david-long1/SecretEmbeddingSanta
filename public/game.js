@@ -30,6 +30,18 @@ const COLORS = {
   textMuted: '#8a7a7c'
 };
 
+// Gift color combinations (box, ribbon) - candy cane inspired
+const GIFT_COLORS = [
+  { box: '#dc2626', ribbon: '#fff5f5' },  // Classic red + white
+  { box: '#fff5f5', ribbon: '#dc2626' },  // Inverted: white + red
+  { box: '#b91c1c', ribbon: '#fecaca' },  // Dark red + pink
+  { box: '#fecaca', ribbon: '#b91c1c' },  // Pink + dark red
+  { box: '#ef4444', ribbon: '#fff5f5' },  // Light red + white
+  { box: '#7f1d1d', ribbon: '#f87171' },  // Maroon + coral
+  { box: '#f87171', ribbon: '#7f1d1d' },  // Coral + maroon
+  { box: '#fca5a5', ribbon: '#991b1b' },  // Salmon + crimson
+];
+
 // Screen management
 function showScreen(screenId) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -467,30 +479,31 @@ function renderGame() {
   }
 
   // Draw gifts
-  for (const gift of gameState.gifts) {
+  gameState.gifts.forEach((gift, index) => {
     const isFrozen = gift.frozenSecondsLeft !== null;
+    const colorScheme = GIFT_COLORS[index % GIFT_COLORS.length];
 
-    // Gift box (candy cane colors)
+    // Gift box
     ctx.beginPath();
     ctx.rect(gift.position.x - 20, gift.position.y - 20, 40, 40);
-    ctx.fillStyle = isFrozen ? COLORS.frozen : COLORS.red;
+    ctx.fillStyle = isFrozen ? COLORS.frozen : colorScheme.box;
     ctx.fill();
-    ctx.strokeStyle = isFrozen ? COLORS.white : COLORS.white;
+    ctx.strokeStyle = isFrozen ? COLORS.white : colorScheme.ribbon;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Gift ribbon (white stripes)
+    // Gift ribbon
     ctx.beginPath();
     ctx.moveTo(gift.position.x, gift.position.y - 20);
     ctx.lineTo(gift.position.x, gift.position.y + 20);
     ctx.moveTo(gift.position.x - 20, gift.position.y);
     ctx.lineTo(gift.position.x + 20, gift.position.y);
-    ctx.strokeStyle = COLORS.white;
+    ctx.strokeStyle = isFrozen ? COLORS.white : colorScheme.ribbon;
     ctx.lineWidth = 4;
     ctx.stroke();
 
     // Bow
-    ctx.fillStyle = COLORS.white;
+    ctx.fillStyle = isFrozen ? COLORS.white : colorScheme.ribbon;
     ctx.beginPath();
     ctx.arc(gift.position.x, gift.position.y - 20, 8, 0, Math.PI * 2);
     ctx.fill();
@@ -503,7 +516,7 @@ function renderGame() {
       ctx.textBaseline = 'middle';
       ctx.fillText(gift.frozenSecondsLeft + 's', gift.position.x, gift.position.y + 5);
     }
-  }
+  });
 
   // Draw power targeting mode indicator
   if (activePower) {

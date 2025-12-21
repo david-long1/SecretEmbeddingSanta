@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SecretEmbeddingSanta</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Lobby Screen -->
+    <div id="lobby-screen" class="screen active">
+      <header>
+        <h1>🎁 SecretEmbeddingSanta</h1>
+        <p class="subtitle">A nerdy twist on Secret Santa</p>
+      </header>
+
+      <div class="room-list-container">
+        <h2>Game Rooms</h2>
+        <div id="room-list" class="room-list">
+          <p class="empty-state">No rooms available. Create one!</p>
+        </div>
+      </div>
+
+      <button id="create-room-btn" class="btn btn-primary">+ Create Room</button>
+
+      <!-- Create Room Modal -->
+      <div id="create-room-modal" class="modal hidden">
+        <div class="modal-content">
+          <h2>Create Game Room</h2>
+          <form id="create-room-form">
+            <div class="form-group">
+              <label for="room-name">Room Name</label>
+              <input type="text" id="room-name" placeholder="My Secret Santa Game" required>
+            </div>
+            <div class="form-group">
+              <label for="game-duration">Game Duration (minutes)</label>
+              <input type="number" id="game-duration" value="5" min="1" max="30">
+            </div>
+            <div class="form-group">
+              <label for="petrificus-uses">Petrificus Uses (per player)</label>
+              <input type="number" id="petrificus-uses" value="1" min="0" max="10">
+            </div>
+            <div class="form-group">
+              <label for="spy-uses">Spy Uses (per player)</label>
+              <input type="number" id="spy-uses" value="2" min="0" max="10">
+            </div>
+            <div class="form-actions">
+              <button type="button" id="cancel-create" class="btn btn-secondary">Cancel</button>
+              <button type="submit" class="btn btn-primary">Create</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Join Room Modal -->
+      <div id="join-room-modal" class="modal hidden">
+        <div class="modal-content">
+          <h2>Join Room</h2>
+          <form id="join-room-form">
+            <input type="hidden" id="join-room-id">
+            <div class="form-group">
+              <label for="player-name">Your Name</label>
+              <input type="text" id="player-name" placeholder="Enter your name" required>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="cancel-join" class="btn btn-secondary">Cancel</button>
+              <button type="submit" class="btn btn-primary">Join</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Waiting Room Screen -->
+    <div id="waiting-screen" class="screen">
+      <header>
+        <h1 id="waiting-room-name">Room Name</h1>
+        <p class="room-code">Share URL with friends to join!</p>
+      </header>
+
+      <div class="players-container">
+        <h2>Players</h2>
+        <div id="players-list" class="players-list"></div>
+      </div>
+
+      <div class="gift-input-container">
+        <h2>Your Secret Gift</h2>
+        <p class="hint">Describe the gift you're bringing (keep it secret!)</p>
+        <form id="gift-form">
+          <textarea id="gift-description" placeholder="A warm fuzzy sweater with reindeer patterns..." rows="3" required></textarea>
+          <button type="submit" id="submit-gift-btn" class="btn btn-primary">Submit Gift</button>
+        </form>
+        <p id="gift-submitted" class="success-msg hidden">Gift submitted!</p>
+      </div>
+
+      <div id="host-controls" class="host-controls hidden">
+        <button id="start-game-btn" class="btn btn-large btn-primary" disabled>
+          Start Game
+        </button>
+        <p class="hint">Waiting for all players to submit their gifts...</p>
+      </div>
+
+      <button id="leave-room-btn" class="btn btn-secondary">Leave Room</button>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
+      <div class="game-header">
+        <div class="timer-container">
+          <span id="game-timer">5:00</span>
+        </div>
+        <div class="powers-container">
+          <button id="petrificus-btn" class="power-btn" title="Freeze a gift">
+            ❄️ <span id="petrificus-count">1</span>
+          </button>
+          <button id="spy-btn" class="power-btn" title="See another player's guess">
+            🔍 <span id="spy-count">2</span>
+          </button>
+        </div>
+      </div>
+
+      <canvas id="game-canvas"></canvas>
+
+      <div class="guess-container">
+        <input type="text" id="guess-input" placeholder="Type your guess to attract gifts..." autocomplete="off">
+      </div>
+
+      <!-- Spy Result Modal -->
+      <div id="spy-modal" class="modal hidden">
+        <div class="modal-content small">
+          <h3>🔍 Spy Result</h3>
+          <p><strong id="spy-target-name">Player</strong> is guessing:</p>
+          <p id="spy-target-guess" class="spy-guess">"..."</p>
+          <button id="close-spy-modal" class="btn btn-primary">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Screen -->
+    <div id="results-screen" class="screen">
+      <header>
+        <h1>🎉 Game Over!</h1>
+      </header>
+
+      <div id="results-list" class="results-list"></div>
+
+      <button id="back-to-lobby-btn" class="btn btn-primary">Back to Lobby</button>
+    </div>
+  </div>
+
+  <script src="/game.js"></script>
+</body>
+</html>

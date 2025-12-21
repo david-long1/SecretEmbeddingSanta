@@ -7,6 +7,7 @@ let currentRoomId = null;
 let currentRoom = null;
 let gameState = null;
 let isHost = false;
+let pendingHostName = null; // Store host name while waiting for room creation
 
 // Power modes
 let activePower = null; // 'petrificus' | 'spy' | null
@@ -14,6 +15,20 @@ let activePower = null; // 'petrificus' | 'spy' | null
 // Canvas
 let canvas = null;
 let ctx = null;
+
+// Theme colors
+const COLORS = {
+  bgBase: '#1a1215',
+  bgSurface: '#241a1d',
+  border: '#4a3538',
+  white: '#fff5f5',
+  whiteDim: '#e8dada',
+  red: '#dc2626',
+  redLight: '#ef4444',
+  redGlow: 'rgba(220, 38, 38, 0.3)',
+  frozen: '#fecaca',
+  textMuted: '#8a7a7c'
+};
 
 // Screen management
 function showScreen(screenId) {
@@ -100,49 +115,68 @@ function handleMessage(message) {
       break;
 
     case 'error':
-      alert(message.message);
+      showError(message.message);
       break;
   }
+}
+
+// Error display (no more alert!)
+function showError(message) {
+  // For now, console log - could add toast UI later
+  console.error('Error:', message);
 }
 
 // Room list
 function renderRoomList(rooms) {
   const container = document.getElementById('room-list');
+  const waitingRooms = rooms.filter(room => room.phase === 'waiting');
 
-  if (rooms.length === 0) {
-    container.innerHTML = '<p class="empty-state">No rooms available. Create one!</p>';
+  if (waitingRooms.length === 0) {
+    container.innerHTML = '<p class="empty-state">No rooms yet.<br>Create one to get started!</p>';
     return;
   }
 
-  container.innerHTML = rooms
-    .filter(room => room.phase === 'waiting')
-    .map(room => `
-      <div class="room-card">
-        <div class="room-info">
-          <h3>${escapeHtml(room.name)}</h3>
-          <p>${room.playerCount} player${room.playerCount !== 1 ? 's' : ''} • Host: ${escapeHtml(room.hostName)}</p>
+  container.innerHTML = waitingRooms.map(room => `
+    <div class="room-card">
+      <div class="room-info">
+        <h3>${escapeHtml(room.name)}</h3>
+        <div class="room-meta">
+          <span class="player-count">${room.playerCount} player${room.playerCount !== 1 ? 's' : ''}</span>
+          <span>Host: ${escapeHtml(room.hostName)}</span>
         </div>
-        <button class="btn btn-primary" onclick="openJoinModal('${room.id}')">Join</button>
       </div>
-    `).join('');
+      <button class="btn btn-primary" onclick="openJoinModal('${room.id}')">Join</button>
+    </div>
+  `).join('');
 }
 
-// Create room
+// Create room modal
 document.getElementById('create-room-btn').addEventListener('click', () => {
   document.getElementById('create-room-modal').classList.remove('hidden');
+  document.getElementById('host-name').focus();
 });
 
-document.getElementById('cancel-create').addEventListener('click', () => {
+document.getElementById('cancel-create').addEventListener('click', closeCreateModal);
+document.getElementById('close-create-modal').addEventListener('click', closeCreateModal);
+
+function closeCreateModal() {
   document.getElementById('create-room-modal').classList.add('hidden');
-});
+  document.getElementById('create-room-form').reset();
+}
 
 document.getElementById('create-room-form').addEventListener('submit', (e) => {
   e.preventDefault();
 
-  const roomName = document.getElementById('room-name').value;
+  const hostName = document.getElementById('host-name').value.trim();
+  const roomName = document.getElementById('room-name').value.trim();
   const gameDuration = parseInt(document.getElementById('game-duration').value) * 60;
   const petrificusUses = parseInt(document.getElementById('petrificus-uses').value);
   const spyUses = parseInt(document.getElementById('spy-uses').value);
+
+  if (!hostName || !roomName) return;
+
+  // Store host name for after room is created
+  pendingHostName = hostName;
 
   send({
     type: 'create_room',
@@ -150,37 +184,46 @@ document.getElementById('create-room-form').addEventListener('submit', (e) => {
     settings: { gameDuration, petrificusUses, spyUses }
   });
 
-  // Auto-join as host
-  const playerName = prompt('Enter your name:');
-  if (playerName) {
-    // Wait a bit for room to be created
-    setTimeout(() => {
+  // Wait for room_joined message, then auto-join
+  const checkAndJoin = () => {
+    if (currentRoomId && pendingHostName) {
       send({
         type: 'join_room',
         roomId: currentRoomId,
-        playerName
+        playerName: pendingHostName
       });
-    }, 100);
-  }
+      pendingHostName = null;
+    } else {
+      setTimeout(checkAndJoin, 50);
+    }
+  };
+  setTimeout(checkAndJoin, 50);
 
-  document.getElementById('create-room-modal').classList.add('hidden');
+  closeCreateModal();
 });
 
-// Join room
+// Join room modal
 function openJoinModal(roomId) {
   document.getElementById('join-room-id').value = roomId;
   document.getElementById('join-room-modal').classList.remove('hidden');
+  document.getElementById('player-name').focus();
 }
 
-document.getElementById('cancel-join').addEventListener('click', () => {
+document.getElementById('cancel-join').addEventListener('click', closeJoinModal);
+document.getElementById('close-join-modal').addEventListener('click', closeJoinModal);
+
+function closeJoinModal() {
   document.getElementById('join-room-modal').classList.add('hidden');
-});
+  document.getElementById('join-room-form').reset();
+}
 
 document.getElementById('join-room-form').addEventListener('submit', (e) => {
   e.preventDefault();
 
   const roomId = document.getElementById('join-room-id').value;
-  const playerName = document.getElementById('player-name').value;
+  const playerName = document.getElementById('player-name').value.trim();
+
+  if (!playerName) return;
 
   send({
     type: 'join_room',
@@ -188,8 +231,13 @@ document.getElementById('join-room-form').addEventListener('submit', (e) => {
     playerName
   });
 
-  document.getElementById('join-room-modal').classList.add('hidden');
+  closeJoinModal();
 });
+
+// Get initials from name
+function getInitials(name) {
+  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+}
 
 // Waiting room
 function renderWaitingRoom() {
@@ -197,15 +245,21 @@ function renderWaitingRoom() {
 
   const playersList = document.getElementById('players-list');
   playersList.innerHTML = currentRoom.players.map(player => {
-    let classes = 'player-card';
-    if (player.id === currentRoom.hostId) classes += ' is-host';
-    if (player.id === playerId) classes += ' is-you';
+    const isHostPlayer = player.id === currentRoom.hostId;
+    const isMe = player.id === playerId;
+
+    let badges = '';
+    if (isHostPlayer) badges += '<span class="player-badge host">Host</span>';
+    if (isMe) badges += '<span class="player-badge you">You</span>';
 
     return `
-      <div class="${classes}">
-        <span class="player-name">${escapeHtml(player.name)}</span>
+      <div class="player-card">
+        <div class="player-info">
+          <div class="player-avatar">${getInitials(player.name)}</div>
+          <span class="player-name">${escapeHtml(player.name)}${badges}</span>
+        </div>
         <span class="gift-status ${player.hasSubmittedGift ? 'submitted' : 'pending'}">
-          ${player.hasSubmittedGift ? '✓ Gift ready' : '⋯ Waiting'}
+          ${player.hasSubmittedGift ? 'Ready' : 'Waiting'}
         </span>
       </div>
     `;
@@ -224,7 +278,7 @@ function renderWaitingRoom() {
     if (!enoughPlayers) {
       hostControls.querySelector('.hint').textContent = 'Need at least 2 players...';
     } else if (!allReady) {
-      hostControls.querySelector('.hint').textContent = 'Waiting for all players to submit their gifts...';
+      hostControls.querySelector('.hint').textContent = 'Waiting for all players to submit gifts...';
     } else {
       hostControls.querySelector('.hint').textContent = 'All players ready!';
     }
@@ -247,7 +301,9 @@ function renderWaitingRoom() {
 document.getElementById('gift-form').addEventListener('submit', (e) => {
   e.preventDefault();
 
-  const giftDescription = document.getElementById('gift-description').value;
+  const giftDescription = document.getElementById('gift-description').value.trim();
+  if (!giftDescription) return;
+
   send({
     type: 'submit_gift',
     giftDescription
@@ -284,8 +340,10 @@ function resizeCanvas() {
   const header = document.querySelector('.game-header');
   const guessContainer = document.querySelector('.guess-container');
 
-  canvas.width = container.clientWidth;
-  canvas.height = window.innerHeight - header.offsetHeight - guessContainer.offsetHeight;
+  // Get the #app container dimensions
+  const app = document.getElementById('app');
+  canvas.width = app.clientWidth;
+  canvas.height = app.clientHeight - header.offsetHeight - guessContainer.offsetHeight;
 }
 
 function handleCanvasClick(e) {
@@ -366,17 +424,17 @@ function renderGame() {
   ctx.translate(offsetX, offsetY);
   ctx.scale(scale, scale);
 
-  // Draw arena circle (faint)
+  // Draw arena circle (candy cane themed)
   ctx.beginPath();
   ctx.arc(400, 400, 300, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(42, 42, 58, 0.5)';
+  ctx.strokeStyle = COLORS.border;
   ctx.lineWidth = 2;
   ctx.stroke();
 
   // Draw center area (where gifts spawn)
   ctx.beginPath();
   ctx.arc(400, 400, 150, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(42, 42, 58, 0.3)';
+  ctx.strokeStyle = 'rgba(220, 38, 38, 0.2)';
   ctx.setLineDash([5, 5]);
   ctx.stroke();
   ctx.setLineDash([]);
@@ -388,68 +446,77 @@ function renderGame() {
     // Player circle
     ctx.beginPath();
     ctx.arc(player.position.x, player.position.y, 30, 0, Math.PI * 2);
-    ctx.fillStyle = isMe ? '#4a9eff' : '#2a2a3a';
+    ctx.fillStyle = isMe ? COLORS.red : COLORS.bgSurface;
     ctx.fill();
-    ctx.strokeStyle = isMe ? '#5aa8ff' : '#3a3a4a';
+    ctx.strokeStyle = isMe ? COLORS.redLight : COLORS.border;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Player name
-    ctx.fillStyle = isMe ? '#fff' : '#e0e0e5';
-    ctx.font = 'bold 12px -apple-system, sans-serif';
+    // Player initials
+    ctx.fillStyle = COLORS.white;
+    ctx.font = 'bold 14px -apple-system, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(player.name, player.position.x, player.position.y + 50);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(getInitials(player.name), player.position.x, player.position.y);
+
+    // Player name
+    ctx.fillStyle = isMe ? COLORS.white : COLORS.whiteDim;
+    ctx.font = '12px -apple-system, sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText(player.name, player.position.x, player.position.y + 38);
   }
 
   // Draw gifts
   for (const gift of gameState.gifts) {
     const isFrozen = gift.frozenSecondsLeft !== null;
 
-    // Gift box
+    // Gift box (candy cane colors)
     ctx.beginPath();
     ctx.rect(gift.position.x - 20, gift.position.y - 20, 40, 40);
-    ctx.fillStyle = isFrozen ? '#6be5ff' : '#7b5cff';
+    ctx.fillStyle = isFrozen ? COLORS.frozen : COLORS.red;
     ctx.fill();
-    ctx.strokeStyle = isFrozen ? '#9eeeff' : '#9b7cff';
+    ctx.strokeStyle = isFrozen ? COLORS.white : COLORS.white;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Gift ribbon
+    // Gift ribbon (white stripes)
     ctx.beginPath();
     ctx.moveTo(gift.position.x, gift.position.y - 20);
     ctx.lineTo(gift.position.x, gift.position.y + 20);
     ctx.moveTo(gift.position.x - 20, gift.position.y);
     ctx.lineTo(gift.position.x + 20, gift.position.y);
-    ctx.strokeStyle = isFrozen ? '#fff' : '#ffb84a';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = COLORS.white;
+    ctx.lineWidth = 4;
     ctx.stroke();
 
     // Bow
-    ctx.fillStyle = isFrozen ? '#fff' : '#ffb84a';
+    ctx.fillStyle = COLORS.white;
     ctx.beginPath();
     ctx.arc(gift.position.x, gift.position.y - 20, 8, 0, Math.PI * 2);
     ctx.fill();
 
     // Frozen timer
     if (isFrozen) {
-      ctx.fillStyle = '#000';
+      ctx.fillStyle = COLORS.red;
       ctx.font = 'bold 14px -apple-system, sans-serif';
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText(gift.frozenSecondsLeft + 's', gift.position.x, gift.position.y + 5);
     }
   }
 
   // Draw power targeting mode indicator
   if (activePower) {
-    ctx.fillStyle = 'rgba(74, 158, 255, 0.1)';
+    ctx.fillStyle = COLORS.redGlow;
     ctx.fillRect(0, 0, 800, 800);
 
-    ctx.fillStyle = '#4a9eff';
+    ctx.fillStyle = COLORS.white;
     ctx.font = 'bold 16px -apple-system, sans-serif';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
     ctx.fillText(
-      activePower === 'petrificus' ? 'Click a gift to freeze it!' : 'Click a player to spy!',
-      400, 50
+      activePower === 'petrificus' ? 'Tap a gift to freeze it!' : 'Tap a player to spy!',
+      400, 30
     );
   }
 
@@ -463,8 +530,16 @@ function updateGameUI() {
   // Timer
   const minutes = Math.floor(gameState.timeRemaining / 60);
   const seconds = gameState.timeRemaining % 60;
-  document.getElementById('game-timer').textContent =
-    `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const timerEl = document.getElementById('game-timer');
+  timerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+  // Add warning class when < 30 seconds
+  const timerContainer = timerEl.parentElement;
+  if (gameState.timeRemaining < 30) {
+    timerContainer.classList.add('warning');
+  } else {
+    timerContainer.classList.remove('warning');
+  }
 
   // Powers
   const myPlayer = gameState.players.find(p => p.id === playerId);
@@ -533,7 +608,7 @@ function showResults(results) {
     return `
       <div class="result-card ${isMe ? 'is-you' : ''}">
         <div class="player-name">${escapeHtml(result.playerName)}${isMe ? ' (You)' : ''}</div>
-        <div class="gift-desc">${escapeHtml(result.giftDescription)}</div>
+        <div class="gift-desc">"${escapeHtml(result.giftDescription)}"</div>
         <div class="gift-from">From: ${escapeHtml(result.giftOwnerName)}</div>
       </div>
     `;

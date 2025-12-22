@@ -12,6 +12,12 @@ let pendingHostName = null; // Store host name while waiting for room creation
 // Power modes
 let activePower = null; // 'petrificus' | 'spy' | null
 
+// End game animation state
+let endGameResults = null;
+let animatingGiftIndex = -1;
+let giftAnimationProgress = 0;
+let isAnimatingEnd = false;
+
 // Canvas
 let canvas = null;
 let ctx = null;
@@ -113,6 +119,8 @@ function handleMessage(message) {
       break;
 
     case 'game_state':
+      // Don't update if we're animating the end
+      if (isAnimatingEnd) break;
       gameState = message.state;
       updateGameUI();
       renderGame();
@@ -123,7 +131,8 @@ function handleMessage(message) {
       break;
 
     case 'game_end':
-      showResults(message.results);
+      console.log('Game end received:', message.results);
+      startEndGameAnimation(message.results);
       break;
 
     case 'error':
@@ -591,13 +600,22 @@ document.getElementById('spy-btn').addEventListener('click', () => {
   updatePowerButtons();
 });
 
-// Guess input
-let guessDebounce = null;
-document.getElementById('guess-input').addEventListener('input', (e) => {
-  clearTimeout(guessDebounce);
-  guessDebounce = setTimeout(() => {
-    send({ type: 'update_guess', guess: e.target.value });
-  }, 200);
+// Guess input - only submit on button click or Enter key
+function submitGuess() {
+  const input = document.getElementById('guess-input');
+  const guess = input.value.trim();
+  if (guess) {
+    send({ type: 'update_guess', guess });
+  }
+}
+
+document.getElementById('guess-submit-btn').addEventListener('click', submitGuess);
+
+document.getElementById('guess-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    submitGuess();
+  }
 });
 
 // Spy modal
@@ -611,9 +629,180 @@ document.getElementById('close-spy-modal').addEventListener('click', () => {
   document.getElementById('spy-modal').classList.add('hidden');
 });
 
+// End game animation
+function startEndGameAnimation(results) {
+  if (!results || results.length === 0) {
+    console.error('No results to animate');
+    showResults(results);
+    return;
+  }
+
+  endGameResults = results;
+  animatingGiftIndex = 0;
+  giftAnimationProgress = 0;
+  isAnimatingEnd = true;
+
+  // Hide the guess input during animation
+  document.querySelector('.guess-container').style.display = 'none';
+
+  // Start the animation loop
+  animateEndGame();
+}
+
+function animateEndGame() {
+  if (!isAnimatingEnd || !endGameResults) return;
+
+  const result = endGameResults[animatingGiftIndex];
+  if (!result) {
+    // All done, show results
+    finishEndGameAnimation();
+    return;
+  }
+
+  // Animate the gift flying to the player
+  giftAnimationProgress += 0.02; // Speed of animation
+
+  if (giftAnimationProgress >= 1) {
+    // This gift animation is complete, move to next
+    giftAnimationProgress = 0;
+    animatingGiftIndex++;
+
+    if (animatingGiftIndex >= endGameResults.length) {
+      // All gifts animated, show results after a short delay
+      setTimeout(finishEndGameAnimation, 500);
+      return;
+    }
+  }
+
+  // Render the animation frame
+  renderEndGameAnimation();
+
+  // Continue animation
+  requestAnimationFrame(animateEndGame);
+}
+
+function renderEndGameAnimation() {
+  if (!ctx || !endGameResults) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const { scale, offsetX, offsetY } = getCanvasScale();
+
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
+
+  // Draw arena circle
+  ctx.beginPath();
+  ctx.arc(400, 400, 300, 0, Math.PI * 2);
+  ctx.strokeStyle = COLORS.border;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Draw all players (from results data)
+  for (const result of endGameResults) {
+    const isMe = result.playerId === playerId;
+
+    ctx.beginPath();
+    ctx.arc(result.playerPosition.x, result.playerPosition.y, 30, 0, Math.PI * 2);
+    ctx.fillStyle = isMe ? COLORS.red : COLORS.bgSurface;
+    ctx.fill();
+    ctx.strokeStyle = isMe ? COLORS.redLight : COLORS.border;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = COLORS.white;
+    ctx.font = 'bold 14px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(getInitials(result.playerName), result.playerPosition.x, result.playerPosition.y);
+
+    ctx.fillStyle = isMe ? COLORS.white : COLORS.whiteDim;
+    ctx.font = '12px -apple-system, sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText(result.playerName, result.playerPosition.x, result.playerPosition.y + 38);
+  }
+
+  // Draw gifts - completed ones at their player, current one animating, rest at original position
+  for (let i = 0; i < endGameResults.length; i++) {
+    const result = endGameResults[i];
+    const colorScheme = GIFT_COLORS[result.giftColorIndex % GIFT_COLORS.length];
+
+    let giftX, giftY;
+
+    if (i < animatingGiftIndex) {
+      // Already animated - at player position
+      giftX = result.playerPosition.x;
+      giftY = result.playerPosition.y;
+    } else if (i === animatingGiftIndex) {
+      // Currently animating - interpolate
+      const eased = easeOutCubic(giftAnimationProgress);
+      giftX = result.giftPosition.x + (result.playerPosition.x - result.giftPosition.x) * eased;
+      giftY = result.giftPosition.y + (result.playerPosition.y - result.giftPosition.y) * eased;
+    } else {
+      // Not yet animated - at original position
+      giftX = result.giftPosition.x;
+      giftY = result.giftPosition.y;
+    }
+
+    // Draw gift box
+    ctx.beginPath();
+    ctx.rect(giftX - 20, giftY - 20, 40, 40);
+    ctx.fillStyle = colorScheme.box;
+    ctx.fill();
+    ctx.strokeStyle = colorScheme.ribbon;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Gift ribbon
+    ctx.beginPath();
+    ctx.moveTo(giftX, giftY - 20);
+    ctx.lineTo(giftX, giftY + 20);
+    ctx.moveTo(giftX - 20, giftY);
+    ctx.lineTo(giftX + 20, giftY);
+    ctx.strokeStyle = colorScheme.ribbon;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Bow
+    ctx.fillStyle = colorScheme.ribbon;
+    ctx.beginPath();
+    ctx.arc(giftX, giftY - 20, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw text showing current assignment
+  if (animatingGiftIndex < endGameResults.length) {
+    const result = endGameResults[animatingGiftIndex];
+    ctx.fillStyle = COLORS.white;
+    ctx.font = 'bold 18px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${result.playerName} receives a gift!`, 400, 30);
+  }
+
+  ctx.restore();
+}
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function finishEndGameAnimation() {
+  isAnimatingEnd = false;
+  showResults(endGameResults);
+  endGameResults = null;
+  animatingGiftIndex = -1;
+}
+
 // Results
 function showResults(results) {
   showScreen('results-screen');
+
+  if (!results) {
+    console.error('No results to show');
+    return;
+  }
 
   const container = document.getElementById('results-list');
   container.innerHTML = results.map(result => {
@@ -632,6 +821,11 @@ document.getElementById('back-to-lobby-btn').addEventListener('click', () => {
   currentRoomId = null;
   currentRoom = null;
   gameState = null;
+  isAnimatingEnd = false;
+  endGameResults = null;
+  // Reset guess container display
+  const guessContainer = document.querySelector('.guess-container');
+  if (guessContainer) guessContainer.style.display = '';
   showScreen('lobby-screen');
   send({ type: 'get_rooms' });
 });

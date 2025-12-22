@@ -109,7 +109,10 @@ export interface GamePlayerState {
 export interface GameResult {
   playerId: string;
   playerName: string;
+  playerPosition: { x: number; y: number };
   giftId: string;
   giftDescription: string;
   giftOwnerName: string;
+  giftPosition: { x: number; y: number };
+  giftColorIndex: number;
 }

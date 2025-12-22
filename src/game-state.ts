@@ -343,15 +343,21 @@ export function calculateResults(room: Room): GameResult[] {
     }
 
     const player = room.players.get(pair.playerId)!;
-    const gift = room.gifts.find((g) => g.id === pair.giftId)!;
+    const giftIndex = room.gifts.findIndex((g) => g.id === pair.giftId);
+    const gift = room.gifts[giftIndex];
+    if (!gift) continue;
+
     const giftOwner = room.players.get(gift.ownerId);
 
     results.push({
       playerId: player.id,
       playerName: player.name,
+      playerPosition: { ...player.position },
       giftId: gift.id,
       giftDescription: gift.description,
       giftOwnerName: giftOwner?.name || 'Unknown',
+      giftPosition: { ...gift.position },
+      giftColorIndex: giftIndex,
     });
 
     assignedGifts.add(pair.giftId);

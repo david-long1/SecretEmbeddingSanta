@@ -25,6 +25,12 @@ import {
 
 const PORT = 3000;
 
+// Simple logger
+function log(message: string): void {
+  const timestamp = new Date().toLocaleTimeString();
+  console.log(`[${timestamp}] ${message}`);
+}
+
 // Get local IP address
 function getLocalIP(): string {
   const nets = networkInterfaces();
@@ -75,7 +81,9 @@ setInterval(() => {
   const deltaTime = (now - lastTick) / 1000;
   lastTick = now;
 
-  for (const room of getAllRooms().map((r) => getRoom(r.id)).filter(Boolean)) {
+  const roomInfos = getAllRooms();
+  for (const roomInfo of roomInfos) {
+    const room = getRoom(roomInfo.id);
     if (!room || room.phase !== 'playing') continue;
 
     // Update gift positions
@@ -84,6 +92,10 @@ setInterval(() => {
     // Check for game end
     if (checkGameEnd(room)) {
       const results = endGame(room);
+      log(`Game ended: "${room.name}" - ${results.length} players assigned gifts`);
+      for (const result of results) {
+        log(`  ${result.playerName} receives "${result.giftDescription.slice(0, 30)}..." from ${result.giftOwnerName}`);
+      }
       broadcastToRoom(room.id, { type: 'game_end', results });
     } else {
       // Broadcast game state
@@ -104,19 +116,17 @@ async function handleMessage(ws: ServerWebSocket<WSData>, message: ClientMessage
 
     case 'create_room': {
       const room = createRoom(playerId, message.roomName, message.settings);
+      log(`Room created: "${room.name}" (${room.id})`);
       send(ws, { type: 'room_joined', roomId: room.id, playerId });
-      // Auto-join the host to the room
-      // Host will need to call join_room separately to set their name
       break;
     }
 
     case 'join_room': {
       const result = joinRoom(message.roomId, playerId, message.playerName, ws as any);
       if (result.success && result.room) {
+        log(`Player "${message.playerName}" joined room "${result.room.name}"`);
         send(ws, { type: 'room_joined', roomId: result.room.id, playerId });
-        // Broadcast updated room state to all players
         broadcastToRoom(result.room.id, { type: 'room_state', room: getRoomState(result.room) });
-        // Also broadcast updated room list to everyone
         for (const conn of connections.values()) {
           send(conn, { type: 'room_list', rooms: getAllRooms() });
         }
@@ -178,6 +188,7 @@ async function handleMessage(ws: ServerWebSocket<WSData>, message: ClientMessage
       }
       const result = await startGame(room.id);
       if (result.success) {
+        log(`Game started: "${room.name}" with ${room.players.size} players`);
         broadcastToRoom(room.id, { type: 'room_state', room: getRoomState(room) });
         broadcastToRoom(room.id, { type: 'game_state', state: getGameState(room) });
       } else {

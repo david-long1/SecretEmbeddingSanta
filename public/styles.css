@@ -636,8 +636,13 @@ textarea::placeholder {
   border-top: 1px solid var(--border-color);
 }
 
-.guess-container input {
-  width: 100%;
+.guess-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.guess-input-row input {
+  flex: 1;
   padding: 0.875rem 1rem;
   background: var(--bg-base);
   border: 1px solid var(--border-color);
@@ -645,9 +650,15 @@ textarea::placeholder {
   font-size: 1rem;
 }
 
-.guess-container input:focus {
+.guess-input-row input:focus {
   outline: none;
   border-color: var(--red-primary);
+}
+
+.guess-submit {
+  padding: 0.875rem 1.25rem;
+  min-height: auto;
+  font-size: 0.9rem;
 }
 
 /* Spy Modal */

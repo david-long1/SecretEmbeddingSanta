@@ -17,6 +17,8 @@ let endGameResults = null;
 let animatingGiftIndex = -1;
 let giftAnimationProgress = 0;
 let isAnimatingEnd = false;
+let showingToast = false;
+let toastTimeoutId = null;
 
 // Canvas
 let canvas = null;
@@ -633,7 +635,7 @@ document.getElementById('close-spy-modal').addEventListener('click', () => {
 function startEndGameAnimation(results) {
   if (!results || results.length === 0) {
     console.error('No results to animate');
-    showResults(results);
+    showResultsModal(results);
     return;
   }
 
@@ -641,6 +643,7 @@ function startEndGameAnimation(results) {
   animatingGiftIndex = 0;
   giftAnimationProgress = 0;
   isAnimatingEnd = true;
+  showingToast = false;
 
   // Hide the guess input during animation
   document.querySelector('.guess-container').style.display = 'none';
@@ -652,6 +655,13 @@ function startEndGameAnimation(results) {
 function animateEndGame() {
   if (!isAnimatingEnd || !endGameResults) return;
 
+  // If showing toast, don't animate - just wait
+  if (showingToast) {
+    renderEndGameAnimation();
+    requestAnimationFrame(animateEndGame);
+    return;
+  }
+
   const result = endGameResults[animatingGiftIndex];
   if (!result) {
     // All done, show results
@@ -659,19 +669,27 @@ function animateEndGame() {
     return;
   }
 
-  // Animate the gift flying to the player
-  giftAnimationProgress += 0.02; // Speed of animation
+  // Animate the gift flying to the player with acceleration (ease-in)
+  giftAnimationProgress += 0.015; // Slightly slower for more dramatic effect
 
   if (giftAnimationProgress >= 1) {
-    // This gift animation is complete, move to next
-    giftAnimationProgress = 0;
-    animatingGiftIndex++;
+    // Gift arrived! Show toast for 3 seconds
+    giftAnimationProgress = 1;
+    showingToast = true;
+    showGiftToast(result);
 
-    if (animatingGiftIndex >= endGameResults.length) {
-      // All gifts animated, show results after a short delay
-      setTimeout(finishEndGameAnimation, 500);
-      return;
-    }
+    // After 3 seconds, move to next gift
+    toastTimeoutId = setTimeout(() => {
+      hideGiftToast();
+      showingToast = false;
+      giftAnimationProgress = 0;
+      animatingGiftIndex++;
+
+      if (animatingGiftIndex >= endGameResults.length) {
+        // All gifts animated, show results modal
+        setTimeout(finishEndGameAnimation, 300);
+      }
+    }, 3000);
   }
 
   // Render the animation frame
@@ -679,6 +697,25 @@ function animateEndGame() {
 
   // Continue animation
   requestAnimationFrame(animateEndGame);
+}
+
+function showGiftToast(result) {
+  const toast = document.getElementById('gift-toast');
+  const playerNameEl = document.getElementById('toast-player-name');
+  const giftDescEl = document.getElementById('toast-gift-desc');
+
+  playerNameEl.textContent = result.playerName;
+  // Truncate gift description if too long
+  const desc = result.giftDescription.length > 60
+    ? result.giftDescription.slice(0, 57) + '...'
+    : result.giftDescription;
+  giftDescEl.textContent = `"${desc}"`;
+
+  toast.classList.remove('hidden');
+}
+
+function hideGiftToast() {
+  document.getElementById('gift-toast').classList.add('hidden');
 }
 
 function renderEndGameAnimation() {
@@ -735,8 +772,8 @@ function renderEndGameAnimation() {
       giftX = result.playerPosition.x;
       giftY = result.playerPosition.y;
     } else if (i === animatingGiftIndex) {
-      // Currently animating - interpolate
-      const eased = easeOutCubic(giftAnimationProgress);
+      // Currently animating - interpolate with acceleration (ease-in)
+      const eased = easeInCubic(giftAnimationProgress);
       giftX = result.giftPosition.x + (result.playerPosition.x - result.giftPosition.x) * eased;
       giftY = result.giftPosition.y + (result.playerPosition.y - result.giftPosition.y) * eased;
     } else {
@@ -784,27 +821,27 @@ function renderEndGameAnimation() {
   ctx.restore();
 }
 
-function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
+// Ease-in cubic - starts slow, accelerates (dramatic gift delivery)
+function easeInCubic(t) {
+  return t * t * t;
 }
 
 function finishEndGameAnimation() {
   isAnimatingEnd = false;
-  showResults(endGameResults);
+  hideGiftToast();
+  showResultsModal(endGameResults);
   endGameResults = null;
   animatingGiftIndex = -1;
 }
 
-// Results
-function showResults(results) {
-  showScreen('results-screen');
-
+// Results Modal (shows on game screen as overlay)
+function showResultsModal(results) {
   if (!results) {
     console.error('No results to show');
     return;
   }
 
-  const container = document.getElementById('results-list');
+  const container = document.getElementById('results-modal-list');
   container.innerHTML = results.map(result => {
     const isMe = result.playerId === playerId;
     return `
@@ -815,20 +852,39 @@ function showResults(results) {
       </div>
     `;
   }).join('');
+
+  document.getElementById('results-modal').classList.remove('hidden');
 }
 
-document.getElementById('back-to-lobby-btn').addEventListener('click', () => {
+function hideResultsModal() {
+  document.getElementById('results-modal').classList.add('hidden');
+}
+
+function leaveRoom() {
   currentRoomId = null;
   currentRoom = null;
   gameState = null;
   isAnimatingEnd = false;
+  showingToast = false;
+  if (toastTimeoutId) {
+    clearTimeout(toastTimeoutId);
+    toastTimeoutId = null;
+  }
   endGameResults = null;
+  hideResultsModal();
+  hideGiftToast();
   // Reset guess container display
   const guessContainer = document.querySelector('.guess-container');
   if (guessContainer) guessContainer.style.display = '';
   showScreen('lobby-screen');
   send({ type: 'get_rooms' });
-});
+}
+
+// Leave room from results modal
+document.getElementById('leave-room-btn-modal').addEventListener('click', leaveRoom);
+
+// Legacy results screen button (kept for compatibility)
+document.getElementById('back-to-lobby-btn').addEventListener('click', leaveRoom);
 
 // Utility
 function escapeHtml(text) {

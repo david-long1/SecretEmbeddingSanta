@@ -717,6 +717,81 @@ textarea::placeholder {
   margin: 1rem 0;
 }
 
+/* Gift Delivery Toast */
+.gift-toast {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-surface);
+  border: 2px solid var(--red-primary);
+  padding: 1.25rem 1.5rem;
+  z-index: 200;
+  text-align: center;
+  max-width: 90%;
+  box-shadow: 0 4px 24px rgba(220, 38, 38, 0.3);
+  animation: toastPop 0.3s ease-out;
+}
+
+@keyframes toastPop {
+  0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+.gift-toast.hidden {
+  display: none;
+}
+
+.gift-toast .toast-player {
+  color: var(--red-light);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.gift-toast .toast-text {
+  color: var(--text-secondary);
+  margin: 0 0.5rem;
+}
+
+.gift-toast .toast-gift {
+  color: var(--white);
+  font-style: italic;
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+}
+
+/* Results Modal */
+.results-modal-content {
+  max-width: 380px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.results-modal-content .modal-header {
+  margin-bottom: 1rem;
+}
+
+.results-modal-content .modal-header h2 {
+  font-size: 1.25rem;
+}
+
+.results-modal-list {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+  max-height: 50vh;
+}
+
+.results-modal-list .result-card {
+  margin-bottom: 0.5rem;
+}
+
+.results-modal-list .result-card:last-child {
+  margin-bottom: 0;
+}
+
 /* Utility */
 .text-center {
   text-align: center;

@@ -10,7 +10,6 @@ import {
   joinRoom,
   leaveRoom,
   submitGift,
-  canStartGame,
   startGame,
   updatePlayerGuess,
   usePetrificus,
@@ -21,6 +20,9 @@ import {
   getRoomState,
   getGameState,
   getRoomByPlayerId,
+  markPlayerDisconnected,
+  markPlayerConnected,
+  cleanupDisconnectedPlayers,
 } from './game-state';
 
 const PORT = 3000;
@@ -74,8 +76,13 @@ function broadcastToRoom(roomId: string, message: ServerMessage, excludePlayerId
   }
 }
 
+// Timeout settings for disconnected players
+const WAITING_TIMEOUT_MS = 10_000; // 10 seconds in waiting room
+const PLAYING_TIMEOUT_MS = 60_000; // 60 seconds during gameplay
+
 // Game loop - runs every 50ms (20fps)
 let lastTick = Date.now();
+let lastCleanupTick = Date.now();
 setInterval(() => {
   const now = Date.now();
   const deltaTime = (now - lastTick) / 1000;
@@ -84,7 +91,25 @@ setInterval(() => {
   const roomInfos = getAllRooms();
   for (const roomInfo of roomInfos) {
     const room = getRoom(roomInfo.id);
-    if (!room || room.phase !== 'playing') continue;
+    if (!room) continue;
+
+    // Cleanup disconnected players every 1 second
+    if (now - lastCleanupTick > 1000) {
+      const removed = cleanupDisconnectedPlayers(room.id, WAITING_TIMEOUT_MS, PLAYING_TIMEOUT_MS);
+      if (removed.length > 0) {
+        log(`Cleaned up ${removed.length} disconnected player(s) from "${room.name}"`);
+        const updatedRoom = getRoom(room.id);
+        if (updatedRoom) {
+          broadcastToRoom(room.id, { type: 'room_state', room: getRoomState(updatedRoom) });
+          // Update room list for everyone
+          for (const conn of connections.values()) {
+            send(conn, { type: 'room_list', rooms: getAllRooms() });
+          }
+        }
+      }
+    }
+
+    if (room.phase !== 'playing') continue;
 
     // Update gift positions
     updateGiftPositions(room, deltaTime);
@@ -102,6 +127,11 @@ setInterval(() => {
       broadcastToRoom(room.id, { type: 'game_state', state: getGameState(room) });
     }
   }
+
+  // Update cleanup tick
+  if (now - lastCleanupTick > 1000) {
+    lastCleanupTick = now;
+  }
 }, 50);
 
 // Handle WebSocket messages
@@ -115,9 +145,17 @@ async function handleMessage(ws: ServerWebSocket<WSData>, message: ClientMessage
     }
 
     case 'create_room': {
-      const room = createRoom(playerId, message.roomName, message.settings);
-      log(`Room created: "${room.name}" (${room.id})`);
+      const room = createRoom(playerId, message.hostName, message.roomName, message.settings);
+      // Update the host's WebSocket reference (was null during creation)
+      markPlayerConnected(playerId, ws as any);
+      log(`Room created: "${room.name}" (${room.id}) by ${message.hostName}`);
       send(ws, { type: 'room_joined', roomId: room.id, playerId });
+      // Broadcast room state to the host (they're already in the room)
+      send(ws, { type: 'room_state', room: getRoomState(room) });
+      // Update room list for everyone
+      for (const conn of connections.values()) {
+        send(conn, { type: 'room_list', rooms: getAllRooms() });
+      }
       break;
     }
 
@@ -132,6 +170,28 @@ async function handleMessage(ws: ServerWebSocket<WSData>, message: ClientMessage
         }
       } else {
         send(ws, { type: 'error', message: result.error || 'Failed to join room' });
+      }
+      break;
+    }
+
+    case 'leave_room': {
+      const room = getRoomByPlayerId(playerId);
+      if (room) {
+        const roomId = room.id;
+        const roomName = room.name;
+        leaveRoom(playerId);
+        log(`Player ${playerId} left room "${roomName}"`);
+
+        // Notify remaining players
+        const updatedRoom = getRoom(roomId);
+        if (updatedRoom) {
+          broadcastToRoom(roomId, { type: 'room_state', room: getRoomState(updatedRoom) });
+        }
+
+        // Update room list for everyone
+        for (const conn of connections.values()) {
+          send(conn, { type: 'room_list', rooms: getAllRooms() });
+        }
       }
       break;
     }
@@ -196,6 +256,7 @@ async function handleMessage(ws: ServerWebSocket<WSData>, message: ClientMessage
       }
       break;
     }
+
   }
 }
 
@@ -251,15 +312,20 @@ const server = Bun.serve<WSData>({
     close(ws) {
       const playerId = ws.data.playerId;
       const room = getRoomByPlayerId(playerId);
-      leaveRoom(playerId);
       connections.delete(playerId);
 
-      // Notify remaining players
       if (room) {
+        // Mark player as disconnected instead of immediately removing
+        // This allows them to reconnect within the timeout period
+        markPlayerDisconnected(playerId);
+        log(`Player disconnected: ${playerId} from room "${room.name}" (can reconnect)`);
+
+        // Notify remaining players about the disconnection
         const updatedRoom = getRoom(room.id);
         if (updatedRoom) {
           broadcastToRoom(room.id, { type: 'room_state', room: getRoomState(updatedRoom) });
         }
+
         // Update room list for everyone
         for (const conn of connections.values()) {
           send(conn, { type: 'room_list', rooms: getAllRooms() });

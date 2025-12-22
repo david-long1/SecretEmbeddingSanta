@@ -7,7 +7,6 @@ let currentRoomId = null;
 let currentRoom = null;
 let gameState = null;
 let isHost = false;
-let pendingHostName = null; // Store host name while waiting for room creation
 
 // Power modes
 let activePower = null; // 'petrificus' | 'spy' | null
@@ -67,6 +66,7 @@ function connect() {
 
   ws.onopen = () => {
     console.log('Connected to server');
+    // Server will send 'connected' and 'room_list' messages
   };
 
   ws.onclose = () => {
@@ -96,6 +96,7 @@ function handleMessage(message) {
     case 'connected':
       playerId = message.playerId;
       console.log('Player ID:', playerId);
+      // Server sends room_list right after this
       break;
 
     case 'room_list':
@@ -198,29 +199,13 @@ document.getElementById('create-room-form').addEventListener('submit', (e) => {
 
   if (!hostName || !roomName) return;
 
-  // Store host name for after room is created
-  pendingHostName = hostName;
-
+  // Send create_room with hostName - server will auto-join us
   send({
     type: 'create_room',
     roomName,
+    hostName,
     settings: { gameDuration, petrificusUses, spyUses }
   });
-
-  // Wait for room_joined message, then auto-join
-  const checkAndJoin = () => {
-    if (currentRoomId && pendingHostName) {
-      send({
-        type: 'join_room',
-        roomId: currentRoomId,
-        playerName: pendingHostName
-      });
-      pendingHostName = null;
-    } else {
-      setTimeout(checkAndJoin, 50);
-    }
-  };
-  setTimeout(checkAndJoin, 50);
 
   closeCreateModal();
 });
@@ -338,13 +323,8 @@ document.getElementById('start-game-btn').addEventListener('click', () => {
   send({ type: 'start_game' });
 });
 
-// Leave room
-document.getElementById('leave-room-btn').addEventListener('click', () => {
-  currentRoomId = null;
-  currentRoom = null;
-  showScreen('lobby-screen');
-  send({ type: 'get_rooms' });
-});
+// Leave room (waiting room button)
+document.getElementById('leave-room-btn').addEventListener('click', leaveRoom);
 
 // Game canvas
 function initCanvas() {
@@ -861,6 +841,10 @@ function hideResultsModal() {
 }
 
 function leaveRoom() {
+  // Tell the server we're leaving
+  send({ type: 'leave_room' });
+
+  // Clear local state
   currentRoomId = null;
   currentRoom = null;
   gameState = null;
@@ -873,11 +857,12 @@ function leaveRoom() {
   endGameResults = null;
   hideResultsModal();
   hideGiftToast();
+
   // Reset guess container display
   const guessContainer = document.querySelector('.guess-container');
   if (guessContainer) guessContainer.style.display = '';
   showScreen('lobby-screen');
-  send({ type: 'get_rooms' });
+  // Server will broadcast room_list to everyone after leave_room
 }
 
 // Leave room from results modal

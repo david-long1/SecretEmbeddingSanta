@@ -17,6 +17,8 @@ export interface Player {
   spyRemaining: number;
   position: { x: number; y: number }; // position on circle
   ws: WebSocket | null;
+  connected: boolean;
+  disconnectedAt: number | null;
 }
 
 export interface Gift {
@@ -44,8 +46,9 @@ export interface Room {
 
 export type ClientMessage =
   | { type: 'get_rooms' }
-  | { type: 'create_room'; roomName: string; settings: RoomSettings }
+  | { type: 'create_room'; roomName: string; hostName: string; settings: RoomSettings }
   | { type: 'join_room'; roomId: string; playerName: string }
+  | { type: 'leave_room' }
   | { type: 'submit_gift'; giftDescription: string }
   | { type: 'update_guess'; guess: string }
   | { type: 'use_petrificus'; giftId: string }

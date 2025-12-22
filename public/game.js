@@ -8,6 +8,12 @@ let currentRoom = null;
 let gameState = null;
 let isHost = false;
 
+// Connection state
+let reconnectAttempts = 0;
+let reconnectTimeout = null;
+let isReconnecting = false;
+let maxReconnectDelay = 30000; // Max 30 seconds between retries
+
 // Power modes
 let activePower = null; // 'petrificus' | 'spy' | null
 
@@ -61,27 +67,89 @@ function showScreen(screenId) {
 
 // WebSocket connection
 function connect() {
+  // Try to restore playerId from localStorage
+  const storedPlayerId = localStorage.getItem('playerId');
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  let url = `${protocol}//${window.location.host}/ws`;
+
+  // If we have a stored playerId, send it as a query param for reconnection
+  if (storedPlayerId && isReconnecting) {
+    url += `?reconnect=${storedPlayerId}`;
+  }
+
+  ws = new WebSocket(url);
 
   ws.onopen = () => {
     console.log('Connected to server');
-    // Server will send 'connected' and 'room_list' messages
+    reconnectAttempts = 0; // Reset reconnection counter on successful connection
+    isReconnecting = false;
+    updateConnectionStatus('connected');
   };
 
   ws.onclose = () => {
     console.log('Disconnected from server');
-    setTimeout(connect, 1000);
+    updateConnectionStatus('disconnected');
+    scheduleReconnect();
   };
 
   ws.onerror = (error) => {
     console.error('WebSocket error:', error);
+    updateConnectionStatus('error');
   };
 
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data);
     handleMessage(message);
   };
+}
+
+// Exponential backoff reconnection
+function scheduleReconnect() {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+  }
+
+  isReconnecting = true;
+  reconnectAttempts++;
+
+  // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
+
+  console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
+  updateConnectionStatus('reconnecting');
+
+  reconnectTimeout = setTimeout(() => {
+    connect();
+  }, delay);
+}
+
+// Connection status indicator
+function updateConnectionStatus(status) {
+  // We'll add a status indicator to the UI
+  const statusEl = document.getElementById('connection-status');
+  if (!statusEl) return;
+
+  statusEl.className = 'connection-status';
+
+  switch (status) {
+    case 'connected':
+      statusEl.classList.add('connected');
+      statusEl.textContent = '●';
+      statusEl.title = 'Connected';
+      break;
+    case 'reconnecting':
+      statusEl.classList.add('reconnecting');
+      statusEl.textContent = '◌';
+      statusEl.title = `Reconnecting... (attempt ${reconnectAttempts})`;
+      break;
+    case 'disconnected':
+    case 'error':
+      statusEl.classList.add('disconnected');
+      statusEl.textContent = '○';
+      statusEl.title = 'Disconnected';
+      break;
+  }
 }
 
 function send(message) {
@@ -95,6 +163,8 @@ function handleMessage(message) {
   switch (message.type) {
     case 'connected':
       playerId = message.playerId;
+      // Store playerId in localStorage for reconnection
+      localStorage.setItem('playerId', playerId);
       console.log('Player ID:', playerId);
       // Server sends room_list right after this
       break;
@@ -878,5 +948,40 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Page Visibility API - prevent disconnection when tab is hidden
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    console.log('Tab hidden - connection will be maintained');
+  } else {
+    console.log('Tab visible - checking connection');
+    // If WebSocket is closed while we were away, reconnect
+    if (ws && ws.readyState === WebSocket.CLOSED) {
+      console.log('Reconnecting after tab became visible');
+      isReconnecting = true;
+      connect();
+    }
+  }
+});
+
+// Heartbeat to keep connection alive
+let heartbeatInterval = null;
+
+function startHeartbeat() {
+  // Send a ping every 30 seconds to keep connection alive
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      send({ type: 'ping' });
+    }
+  }, 30000);
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
 // Start
 connect();
+startHeartbeat();

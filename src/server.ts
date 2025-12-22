@@ -257,6 +257,12 @@ async function handleMessage(ws: ServerWebSocket<WSData>, message: ClientMessage
       break;
     }
 
+    case 'ping': {
+      // Respond with pong to keep connection alive
+      send(ws, { type: 'pong' });
+      break;
+    }
+
   }
 }
 
@@ -283,7 +289,27 @@ const server = Bun.serve<WSData>({
 
     // WebSocket upgrade
     if (url.pathname === '/ws') {
-      const playerId = generatePlayerId();
+      // Check if this is a reconnection attempt
+      const reconnectId = url.searchParams.get('reconnect');
+      let playerId: string;
+
+      if (reconnectId) {
+        // Attempting to reconnect with existing playerId
+        const room = getRoomByPlayerId(reconnectId);
+        if (room) {
+          // Valid reconnection - reuse the playerId
+          playerId = reconnectId;
+          log(`Player ${playerId} reconnecting to room "${room.name}"`);
+        } else {
+          // PlayerId not found in any room, generate new one
+          playerId = generatePlayerId();
+          log(`Reconnect failed for ${reconnectId}, assigned new ID: ${playerId}`);
+        }
+      } else {
+        // New connection
+        playerId = generatePlayerId();
+      }
+
       const success = server.upgrade(req, { data: { playerId } });
       if (success) {
         return undefined;
@@ -296,9 +322,32 @@ const server = Bun.serve<WSData>({
   },
   websocket: {
     open(ws) {
-      connections.set(ws.data.playerId, ws);
-      send(ws, { type: 'connected', playerId: ws.data.playerId });
-      send(ws, { type: 'room_list', rooms: getAllRooms() });
+      const playerId = ws.data.playerId;
+      connections.set(playerId, ws);
+
+      // Check if this player is reconnecting to a room
+      const room = getRoomByPlayerId(playerId);
+      if (room) {
+        // Player is reconnecting - mark them as connected
+        markPlayerConnected(playerId, ws as any);
+        log(`Player ${playerId} reconnected to room "${room.name}"`);
+
+        // Send updated room state
+        send(ws, { type: 'connected', playerId });
+        send(ws, { type: 'room_state', room: getRoomState(room) });
+
+        // Notify others in the room
+        broadcastToRoom(room.id, { type: 'room_state', room: getRoomState(room) }, playerId);
+
+        // Update room list for everyone
+        for (const conn of connections.values()) {
+          send(conn, { type: 'room_list', rooms: getAllRooms() });
+        }
+      } else {
+        // New connection
+        send(ws, { type: 'connected', playerId });
+        send(ws, { type: 'room_list', rooms: getAllRooms() });
+      }
     },
     async message(ws, message) {
       try {

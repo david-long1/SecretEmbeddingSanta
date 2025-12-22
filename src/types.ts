@@ -53,7 +53,8 @@ export type ClientMessage =
   | { type: 'update_guess'; guess: string }
   | { type: 'use_petrificus'; giftId: string }
   | { type: 'use_spy'; targetPlayerId: string }
-  | { type: 'start_game' };
+  | { type: 'start_game' }
+  | { type: 'ping' };
 
 export type ServerMessage =
   | { type: 'connected'; playerId: string }
@@ -63,7 +64,8 @@ export type ServerMessage =
   | { type: 'game_state'; state: GameStatePayload }
   | { type: 'spy_result'; targetName: string; targetGuess: string }
   | { type: 'game_end'; results: GameResult[] }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'pong' };
 
 export interface RoomInfo {
   id: string;

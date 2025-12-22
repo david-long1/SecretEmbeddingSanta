@@ -96,6 +96,44 @@ body {
   display: flex;
 }
 
+/* Connection Status */
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.connection-status {
+  font-size: 20px;
+  line-height: 1;
+  transition: all 0.3s ease;
+}
+
+.connection-status.connected {
+  color: var(--success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.connection-status.reconnecting {
+  color: var(--warning);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.connection-status.disconnected {
+  color: var(--text-muted);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.3; }
+}
+
 /* Header */
 header {
   text-align: center;

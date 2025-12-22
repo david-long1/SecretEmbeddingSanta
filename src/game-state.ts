@@ -309,6 +309,8 @@ export function updateGiftPositions(room: Room, deltaTime: number): void {
     let moveY = 0;
 
     for (const player of room.players.values()) {
+      // Player's guess cannot affect their own gift
+      if (player.id === gift.ownerId) continue;
       if (!player.guessEmbedding) continue;
 
       const similarity = cosineSimilarity(gift.embedding, player.guessEmbedding);
@@ -349,6 +351,9 @@ export function calculateResults(room: Room): GameResult[] {
 
   for (const player of room.players.values()) {
     for (const gift of room.gifts) {
+      // Player cannot receive their own gift
+      if (player.id === gift.ownerId) continue;
+
       const dx = player.position.x - gift.position.x;
       const dy = player.position.y - gift.position.y;
       const distance = Math.sqrt(dx * dx + dy * dy);

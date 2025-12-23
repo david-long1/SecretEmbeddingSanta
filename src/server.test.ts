@@ -1,15 +1,13 @@
-// Integration tests for WebSocket reconnection and connection stability
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import type { ServerWebSocket } from 'bun';
+// Integration tests for WebSocket connection and gameplay
+import { describe, expect, test } from 'bun:test';
 
 // Tests connect to the dev server (must be running)
 const WS_URL = `ws://localhost:3000/ws`;
 
 // Helper to create WebSocket connection
-function createConnection(reconnectId?: string): Promise<WebSocket> {
+function createConnection(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const url = reconnectId ? `${WS_URL}?reconnect=${reconnectId}` : WS_URL;
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => resolve(ws);
     ws.onerror = (error) => reject(error);
@@ -81,72 +79,6 @@ describe('WebSocket Connection', () => {
   });
 });
 
-describe('WebSocket Reconnection', () => {
-  test('should reconnect with same playerId when in a room', async () => {
-    // First connection - create a room
-    const ws1 = await createConnection();
-    const connectedMsg1 = await waitForMessage(ws1, 'connected');
-    const playerId = connectedMsg1.playerId;
-
-    // Create a room
-    ws1.send(
-      JSON.stringify({
-        type: 'create_room',
-        roomName: 'Test Room',
-        hostName: 'Test Host',
-        settings: {
-          gameDuration: 300,
-          petrificusUses: 1,
-          spyUses: 2,
-        },
-      }),
-    );
-
-    await waitForMessage(ws1, 'room_joined');
-
-    // Disconnect
-    await closeConnection(ws1);
-
-    // Wait a bit to simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Reconnect with same playerId
-    const ws2 = await createConnection(playerId);
-    const connectedMsg2 = await waitForMessage(ws2, 'connected');
-
-    // Should get the same playerId back
-    expect(connectedMsg2.playerId).toBe(playerId);
-
-    // Should receive room_state (because we're still in the room)
-    const roomStateMsg = await waitForMessage(ws2, 'room_state');
-    expect(roomStateMsg.room.name).toBe('Test Room');
-
-    await closeConnection(ws2);
-  });
-
-  test('should get new playerId when reconnecting without being in a room', async () => {
-    // First connection
-    const ws1 = await createConnection();
-    const connectedMsg1 = await waitForMessage(ws1, 'connected');
-    const playerId1 = connectedMsg1.playerId;
-
-    // Disconnect without joining a room
-    await closeConnection(ws1);
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Try to reconnect with old playerId
-    const ws2 = await createConnection(playerId1);
-    const connectedMsg2 = await waitForMessage(ws2, 'connected');
-
-    // Should get a NEW playerId (because we weren't in a room)
-    expect(connectedMsg2.playerId).not.toBe(playerId1);
-    expect(connectedMsg2.playerId).toMatch(/^p_/);
-
-    await closeConnection(ws2);
-  });
-});
-
 describe('Ping/Pong Heartbeat', () => {
   test('should respond to ping with pong', async () => {
     const ws = await createConnection();
@@ -160,150 +92,6 @@ describe('Ping/Pong Heartbeat', () => {
     expect(pongMsg.type).toBe('pong');
 
     await closeConnection(ws);
-  });
-});
-
-describe('Room Creation and Joining', () => {
-  test('should create room and maintain state on reconnection', async () => {
-    // Create room
-    const ws1 = await createConnection();
-    const { playerId } = await waitForMessage(ws1, 'connected');
-
-    ws1.send(
-      JSON.stringify({
-        type: 'create_room',
-        roomName: 'Reconnect Test Room',
-        hostName: 'Host Player',
-        settings: {
-          gameDuration: 300,
-          petrificusUses: 1,
-          spyUses: 2,
-        },
-      }),
-    );
-
-    const joinedMsg = await waitForMessage(ws1, 'room_joined');
-    const roomId = joinedMsg.roomId;
-
-    // Get room state
-    const roomState1 = await waitForMessage(ws1, 'room_state');
-    expect(roomState1.room.players.length).toBe(1);
-    expect(roomState1.room.players[0].name).toBe('Host Player');
-
-    // Disconnect
-    await closeConnection(ws1);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Reconnect with same playerId
-    const ws2 = await createConnection(playerId);
-    await waitForMessage(ws2, 'connected');
-
-    // Should receive room state with same room
-    const roomState2 = await waitForMessage(ws2, 'room_state');
-    expect(roomState2.room.id).toBe(roomId);
-    expect(roomState2.room.name).toBe('Reconnect Test Room');
-    expect(roomState2.room.players.length).toBe(1);
-
-    await closeConnection(ws2);
-  });
-
-  test('should handle multiple players and reconnections', async () => {
-    // Host creates room
-    const wsHost = await createConnection();
-    await waitForMessage(wsHost, 'connected');
-
-    // Consume initial room_list for host
-    await waitForMessage(wsHost, 'room_list');
-
-    wsHost.send(
-      JSON.stringify({
-        type: 'create_room',
-        roomName: 'Multi Player Test',
-        hostName: 'Host',
-        settings: {
-          gameDuration: 300,
-          petrificusUses: 1,
-          spyUses: 2,
-        },
-      }),
-    );
-
-    const hostJoined = await waitForMessage(wsHost, 'room_joined');
-    const roomId = hostJoined.roomId;
-
-    // Wait for host's own room_state
-    await waitForMessage(wsHost, 'room_state');
-
-    // Player 2 joins
-    const wsPlayer = await createConnection();
-    const playerMsg = await waitForMessage(wsPlayer, 'connected');
-    const playerId = playerMsg.playerId;
-
-    // Consume initial room_list for player
-    await waitForMessage(wsPlayer, 'room_list');
-
-    wsPlayer.send(
-      JSON.stringify({
-        type: 'join_room',
-        roomId,
-        playerName: 'Player 2',
-      }),
-    );
-
-    await waitForMessage(wsPlayer, 'room_joined');
-
-    // Wait for room_state updates (broadcasts happen asynchronously)
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    // Player 2 disconnects
-    await closeConnection(wsPlayer);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    // Player 2 reconnects
-    const wsPlayer2 = await createConnection(playerId);
-    await waitForMessage(wsPlayer2, 'connected');
-
-    const reconnectedRoomState = await waitForMessage(wsPlayer2, 'room_state');
-    expect(reconnectedRoomState.room.players.length).toBe(2);
-    expect(reconnectedRoomState.room.id).toBe(roomId);
-
-    // Cleanup
-    await closeConnection(wsHost);
-    await closeConnection(wsPlayer2);
-  });
-});
-
-describe('Connection Status Tracking', () => {
-  test('should handle rapid disconnect/reconnect', async () => {
-    const ws1 = await createConnection();
-    const { playerId } = await waitForMessage(ws1, 'connected');
-
-    // Create room
-    ws1.send(
-      JSON.stringify({
-        type: 'create_room',
-        roomName: 'Rapid Test',
-        hostName: 'Rapid Host',
-        settings: {
-          gameDuration: 300,
-          petrificusUses: 1,
-          spyUses: 2,
-        },
-      }),
-    );
-
-    await waitForMessage(ws1, 'room_joined');
-
-    // Rapid disconnect
-    await closeConnection(ws1);
-
-    // Immediate reconnect (simulating mobile app switching)
-    const ws2 = await createConnection(playerId);
-    const reconnectedMsg = await waitForMessage(ws2, 'connected');
-
-    expect(reconnectedMsg.playerId).toBe(playerId);
-
-    await closeConnection(ws2);
   });
 });
 

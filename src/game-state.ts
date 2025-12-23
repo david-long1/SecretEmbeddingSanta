@@ -94,9 +94,6 @@ export function createRoom(
     petrificusRemaining: settings.petrificusUses,
     spyRemaining: settings.spyUses,
     position: { x: 0, y: 0 },
-    ws: null,
-    connected: true,
-    disconnectedAt: null,
   };
 
   room.players.set(hostId, hostPlayer);
@@ -131,7 +128,6 @@ export function joinRoom(
   roomId: string,
   playerId: string,
   playerName: string,
-  ws: unknown,
 ): { success: boolean; error?: string; room?: Room } {
   const room = rooms.get(roomId);
   if (!room) {
@@ -159,9 +155,6 @@ export function joinRoom(
     petrificusRemaining: room.settings.petrificusUses,
     spyRemaining: room.settings.spyUses,
     position: { x: 0, y: 0 },
-    ws,
-    connected: true,
-    disconnectedAt: null,
   };
 
   room.players.set(playerId, player);
@@ -483,102 +476,4 @@ export function getGameState(room: Room): GameStatePayload {
 
 export function getPlayerRoom(playerId: string): string | undefined {
   return playerToRoom.get(playerId);
-}
-
-export function updatePlayerWs(playerId: string, ws: WebSocket): void {
-  const room = getRoomByPlayerId(playerId);
-  if (!room) return;
-  const player = room.players.get(playerId);
-  if (player) {
-    player.ws = ws;
-    player.connected = true;
-    player.disconnectedAt = null;
-  }
-}
-
-export function markPlayerDisconnected(playerId: string): void {
-  const room = getRoomByPlayerId(playerId);
-  if (!room) return;
-  const player = room.players.get(playerId);
-  if (player) {
-    player.connected = false;
-    player.disconnectedAt = Date.now();
-    player.ws = null;
-  }
-}
-
-export function markPlayerConnected(playerId: string, ws: unknown): void {
-  const room = getRoomByPlayerId(playerId);
-  if (!room) return;
-  const player = room.players.get(playerId);
-  if (player) {
-    player.connected = true;
-    player.disconnectedAt = null;
-    player.ws = ws;
-  }
-}
-
-export function cleanupDisconnectedPlayers(
-  roomId: string,
-  waitingTimeoutMs: number,
-  playingTimeoutMs: number,
-): string[] {
-  const room = rooms.get(roomId);
-  if (!room) return [];
-
-  const now = Date.now();
-  const timeoutMs =
-    room.phase === 'waiting' ? waitingTimeoutMs : playingTimeoutMs;
-  const removedPlayerIds: string[] = [];
-
-  for (const player of room.players.values()) {
-    if (!player.connected && player.disconnectedAt) {
-      if (now - player.disconnectedAt > timeoutMs) {
-        removedPlayerIds.push(player.id);
-      }
-    }
-  }
-
-  // Remove the timed-out players
-  for (const playerId of removedPlayerIds) {
-    room.players.delete(playerId);
-    playerToRoom.delete(playerId);
-  }
-
-  // Handle empty room or host reassignment
-  if (room.players.size === 0) {
-    rooms.delete(roomId);
-  } else if (removedPlayerIds.includes(room.hostId)) {
-    // Reassign host to first remaining connected player, or any player
-    const connectedPlayer = Array.from(room.players.values()).find(
-      (p) => p.connected,
-    );
-    const newHostId = connectedPlayer?.id || room.players.keys().next().value;
-    if (newHostId) {
-      room.hostId = newHostId;
-    }
-    updatePlayerPositions(room);
-  } else if (removedPlayerIds.length > 0) {
-    updatePlayerPositions(room);
-  }
-
-  return removedPlayerIds;
-}
-
-export function reconnectPlayer(
-  oldPlayerId: string,
-  newWs: WebSocket,
-): { success: boolean; room?: Room } {
-  const room = getRoomByPlayerId(oldPlayerId);
-  if (!room) return { success: false };
-
-  const player = room.players.get(oldPlayerId);
-  if (!player) return { success: false };
-
-  // Restore connection
-  player.ws = newWs;
-  player.connected = true;
-  player.disconnectedAt = null;
-
-  return { success: true, room };
 }

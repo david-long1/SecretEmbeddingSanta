@@ -16,9 +16,6 @@ export interface Player {
   petrificusRemaining: number;
   spyRemaining: number;
   position: { x: number; y: number }; // position on circle
-  ws: unknown; // WebSocket reference (Bun ServerWebSocket or standard WebSocket)
-  connected: boolean;
-  disconnectedAt: number | null;
 }
 
 export interface Gift {

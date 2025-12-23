@@ -4,7 +4,6 @@ import { networkInterfaces } from 'node:os';
 import type { ServerWebSocket } from 'bun';
 import {
   checkGameEnd,
-  cleanupDisconnectedPlayers,
   createRoom,
   endGame,
   getAllRooms,
@@ -14,8 +13,6 @@ import {
   getRoomState,
   joinRoom,
   leaveRoom,
-  markPlayerConnected,
-  markPlayerDisconnected,
   startGame,
   submitGift,
   updateGiftPositions,
@@ -80,13 +77,8 @@ function broadcastToRoom(
   }
 }
 
-// Timeout settings for disconnected players
-const WAITING_TIMEOUT_MS = 10_000; // 10 seconds in waiting room
-const PLAYING_TIMEOUT_MS = 60_000; // 60 seconds during gameplay
-
 // Game loop - runs every 50ms (20fps)
 let lastTick = Date.now();
-let lastCleanupTick = Date.now();
 setInterval(() => {
   const now = Date.now();
   const deltaTime = (now - lastTick) / 1000;
@@ -96,31 +88,6 @@ setInterval(() => {
   for (const roomInfo of roomInfos) {
     const room = getRoom(roomInfo.id);
     if (!room) continue;
-
-    // Cleanup disconnected players every 1 second
-    if (now - lastCleanupTick > 1000) {
-      const removed = cleanupDisconnectedPlayers(
-        room.id,
-        WAITING_TIMEOUT_MS,
-        PLAYING_TIMEOUT_MS,
-      );
-      if (removed.length > 0) {
-        log(
-          `Cleaned up ${removed.length} disconnected player(s) from "${room.name}"`,
-        );
-        const updatedRoom = getRoom(room.id);
-        if (updatedRoom) {
-          broadcastToRoom(room.id, {
-            type: 'room_state',
-            room: getRoomState(updatedRoom),
-          });
-          // Update room list for everyone
-          for (const conn of connections.values()) {
-            send(conn, { type: 'room_list', rooms: getAllRooms() });
-          }
-        }
-      }
-    }
 
     if (room.phase !== 'playing') continue;
 
@@ -147,11 +114,6 @@ setInterval(() => {
       });
     }
   }
-
-  // Update cleanup tick
-  if (now - lastCleanupTick > 1000) {
-    lastCleanupTick = now;
-  }
 }, 50);
 
 // Handle WebSocket messages
@@ -174,8 +136,6 @@ async function handleMessage(
         message.roomName,
         message.settings,
       );
-      // Update the host's WebSocket reference (was null during creation)
-      markPlayerConnected(playerId, ws);
       log(`Room created: "${room.name}" (${room.id}) by ${message.hostName}`);
       send(ws, { type: 'room_joined', roomId: room.id, playerId });
       // Broadcast room state to the host (they're already in the room)
@@ -188,7 +148,7 @@ async function handleMessage(
     }
 
     case 'join_room': {
-      const result = joinRoom(message.roomId, playerId, message.playerName, ws);
+      const result = joinRoom(message.roomId, playerId, message.playerName);
       if (result.success && result.room) {
         log(`Player "${message.playerName}" joined room "${result.room.name}"`);
         send(ws, { type: 'room_joined', roomId: result.room.id, playerId });
@@ -353,28 +313,8 @@ const server = Bun.serve<WSData>({
 
     // WebSocket upgrade
     if (url.pathname === '/ws') {
-      // Check if this is a reconnection attempt
-      const reconnectId = url.searchParams.get('reconnect');
-      let playerId: string;
-
-      if (reconnectId) {
-        // Attempting to reconnect with existing playerId
-        const room = getRoomByPlayerId(reconnectId);
-        if (room) {
-          // Valid reconnection - reuse the playerId
-          playerId = reconnectId;
-          log(`Player ${playerId} reconnecting to room "${room.name}"`);
-        } else {
-          // PlayerId not found in any room, generate new one
-          playerId = generatePlayerId();
-          log(
-            `Reconnect failed for ${reconnectId}, assigned new ID: ${playerId}`,
-          );
-        }
-      } else {
-        // New connection
-        playerId = generatePlayerId();
-      }
+      // Always generate new playerId (no reconnection support)
+      const playerId = generatePlayerId();
 
       const success = server.upgrade(req, { data: { playerId } });
       if (success) {
@@ -391,33 +331,9 @@ const server = Bun.serve<WSData>({
       const playerId = ws.data.playerId;
       connections.set(playerId, ws);
 
-      // Check if this player is reconnecting to a room
-      const room = getRoomByPlayerId(playerId);
-      if (room) {
-        // Player is reconnecting - mark them as connected
-        markPlayerConnected(playerId, ws);
-        log(`Player ${playerId} reconnected to room "${room.name}"`);
-
-        // Send updated room state
-        send(ws, { type: 'connected', playerId });
-        send(ws, { type: 'room_state', room: getRoomState(room) });
-
-        // Notify others in the room
-        broadcastToRoom(
-          room.id,
-          { type: 'room_state', room: getRoomState(room) },
-          playerId,
-        );
-
-        // Update room list for everyone
-        for (const conn of connections.values()) {
-          send(conn, { type: 'room_list', rooms: getAllRooms() });
-        }
-      } else {
-        // New connection
-        send(ws, { type: 'connected', playerId });
-        send(ws, { type: 'room_list', rooms: getAllRooms() });
-      }
+      // Always a new connection (no reconnection support)
+      send(ws, { type: 'connected', playerId });
+      send(ws, { type: 'room_list', rooms: getAllRooms() });
     },
     async message(ws, message) {
       try {
@@ -434,17 +350,16 @@ const server = Bun.serve<WSData>({
       connections.delete(playerId);
 
       if (room) {
-        // Mark player as disconnected instead of immediately removing
-        // This allows them to reconnect within the timeout period
-        markPlayerDisconnected(playerId);
-        log(
-          `Player disconnected: ${playerId} from room "${room.name}" (can reconnect)`,
-        );
+        // Immediately remove player from room (no reconnection support)
+        const roomId = room.id;
+        const roomName = room.name;
+        leaveRoom(playerId);
+        log(`Player ${playerId} left room "${roomName}"`);
 
-        // Notify remaining players about the disconnection
-        const updatedRoom = getRoom(room.id);
+        // Notify remaining players
+        const updatedRoom = getRoom(roomId);
         if (updatedRoom) {
-          broadcastToRoom(room.id, {
+          broadcastToRoom(roomId, {
             type: 'room_state',
             room: getRoomState(updatedRoom),
           });

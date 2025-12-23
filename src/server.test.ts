@@ -1,6 +1,6 @@
 // Integration tests for WebSocket reconnection and connection stability
-import { test, expect, describe, beforeAll, afterAll } from "bun:test";
-import type { ServerWebSocket } from "bun";
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import type { ServerWebSocket } from 'bun';
 
 // Tests connect to the dev server (must be running)
 const WS_URL = `ws://localhost:3000/ws`;
@@ -20,7 +20,12 @@ function createConnection(reconnectId?: string): Promise<WebSocket> {
 }
 
 // Helper to wait for message
-function waitForMessage(ws: WebSocket, type: string, timeout = 5000): Promise<any> {
+// biome-ignore lint/suspicious/noExplicitAny: Test helper function needs flexible return type
+function waitForMessage(
+  ws: WebSocket,
+  type: string,
+  timeout = 5000,
+): Promise<any> {
   return new Promise((resolve, reject) => {
     const handler = (event: MessageEvent) => {
       const message = JSON.parse(event.data);
@@ -47,8 +52,8 @@ function closeConnection(ws: WebSocket): Promise<void> {
   });
 }
 
-describe("WebSocket Connection", () => {
-  test("should connect and receive playerId", async () => {
+describe('WebSocket Connection', () => {
+  test('should connect and receive playerId', async () => {
     const ws = await createConnection();
 
     const connectedMsg = await waitForMessage(ws, 'connected');
@@ -60,7 +65,7 @@ describe("WebSocket Connection", () => {
     await closeConnection(ws);
   });
 
-  test("should receive room list after connection", async () => {
+  test('should receive room list after connection', async () => {
     const ws = await createConnection();
 
     // Wait for connected message first
@@ -76,24 +81,26 @@ describe("WebSocket Connection", () => {
   });
 });
 
-describe("WebSocket Reconnection", () => {
-  test("should reconnect with same playerId when in a room", async () => {
+describe('WebSocket Reconnection', () => {
+  test('should reconnect with same playerId when in a room', async () => {
     // First connection - create a room
     const ws1 = await createConnection();
     const connectedMsg1 = await waitForMessage(ws1, 'connected');
     const playerId = connectedMsg1.playerId;
 
     // Create a room
-    ws1.send(JSON.stringify({
-      type: 'create_room',
-      roomName: 'Test Room',
-      hostName: 'Test Host',
-      settings: {
-        gameDuration: 300,
-        petrificusUses: 1,
-        spyUses: 2
-      }
-    }));
+    ws1.send(
+      JSON.stringify({
+        type: 'create_room',
+        roomName: 'Test Room',
+        hostName: 'Test Host',
+        settings: {
+          gameDuration: 300,
+          petrificusUses: 1,
+          spyUses: 2,
+        },
+      }),
+    );
 
     await waitForMessage(ws1, 'room_joined');
 
@@ -101,7 +108,7 @@ describe("WebSocket Reconnection", () => {
     await closeConnection(ws1);
 
     // Wait a bit to simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Reconnect with same playerId
     const ws2 = await createConnection(playerId);
@@ -117,7 +124,7 @@ describe("WebSocket Reconnection", () => {
     await closeConnection(ws2);
   });
 
-  test("should get new playerId when reconnecting without being in a room", async () => {
+  test('should get new playerId when reconnecting without being in a room', async () => {
     // First connection
     const ws1 = await createConnection();
     const connectedMsg1 = await waitForMessage(ws1, 'connected');
@@ -126,7 +133,7 @@ describe("WebSocket Reconnection", () => {
     // Disconnect without joining a room
     await closeConnection(ws1);
 
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Try to reconnect with old playerId
     const ws2 = await createConnection(playerId1);
@@ -140,8 +147,8 @@ describe("WebSocket Reconnection", () => {
   });
 });
 
-describe("Ping/Pong Heartbeat", () => {
-  test("should respond to ping with pong", async () => {
+describe('Ping/Pong Heartbeat', () => {
+  test('should respond to ping with pong', async () => {
     const ws = await createConnection();
     await waitForMessage(ws, 'connected');
 
@@ -156,22 +163,24 @@ describe("Ping/Pong Heartbeat", () => {
   });
 });
 
-describe("Room Creation and Joining", () => {
-  test("should create room and maintain state on reconnection", async () => {
+describe('Room Creation and Joining', () => {
+  test('should create room and maintain state on reconnection', async () => {
     // Create room
     const ws1 = await createConnection();
     const { playerId } = await waitForMessage(ws1, 'connected');
 
-    ws1.send(JSON.stringify({
-      type: 'create_room',
-      roomName: 'Reconnect Test Room',
-      hostName: 'Host Player',
-      settings: {
-        gameDuration: 300,
-        petrificusUses: 1,
-        spyUses: 2
-      }
-    }));
+    ws1.send(
+      JSON.stringify({
+        type: 'create_room',
+        roomName: 'Reconnect Test Room',
+        hostName: 'Host Player',
+        settings: {
+          gameDuration: 300,
+          petrificusUses: 1,
+          spyUses: 2,
+        },
+      }),
+    );
 
     const joinedMsg = await waitForMessage(ws1, 'room_joined');
     const roomId = joinedMsg.roomId;
@@ -183,7 +192,7 @@ describe("Room Creation and Joining", () => {
 
     // Disconnect
     await closeConnection(ws1);
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Reconnect with same playerId
     const ws2 = await createConnection(playerId);
@@ -198,25 +207,26 @@ describe("Room Creation and Joining", () => {
     await closeConnection(ws2);
   });
 
-  test("should handle multiple players and reconnections", async () => {
+  test('should handle multiple players and reconnections', async () => {
     // Host creates room
     const wsHost = await createConnection();
-    const hostMsg = await waitForMessage(wsHost, 'connected');
-    const hostId = hostMsg.playerId;
+    await waitForMessage(wsHost, 'connected');
 
     // Consume initial room_list for host
     await waitForMessage(wsHost, 'room_list');
 
-    wsHost.send(JSON.stringify({
-      type: 'create_room',
-      roomName: 'Multi Player Test',
-      hostName: 'Host',
-      settings: {
-        gameDuration: 300,
-        petrificusUses: 1,
-        spyUses: 2
-      }
-    }));
+    wsHost.send(
+      JSON.stringify({
+        type: 'create_room',
+        roomName: 'Multi Player Test',
+        hostName: 'Host',
+        settings: {
+          gameDuration: 300,
+          petrificusUses: 1,
+          spyUses: 2,
+        },
+      }),
+    );
 
     const hostJoined = await waitForMessage(wsHost, 'room_joined');
     const roomId = hostJoined.roomId;
@@ -232,20 +242,22 @@ describe("Room Creation and Joining", () => {
     // Consume initial room_list for player
     await waitForMessage(wsPlayer, 'room_list');
 
-    wsPlayer.send(JSON.stringify({
-      type: 'join_room',
-      roomId,
-      playerName: 'Player 2'
-    }));
+    wsPlayer.send(
+      JSON.stringify({
+        type: 'join_room',
+        roomId,
+        playerName: 'Player 2',
+      }),
+    );
 
     await waitForMessage(wsPlayer, 'room_joined');
 
     // Wait for room_state updates (broadcasts happen asynchronously)
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Player 2 disconnects
     await closeConnection(wsPlayer);
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Player 2 reconnects
     const wsPlayer2 = await createConnection(playerId);
@@ -261,22 +273,24 @@ describe("Room Creation and Joining", () => {
   });
 });
 
-describe("Connection Status Tracking", () => {
-  test("should handle rapid disconnect/reconnect", async () => {
+describe('Connection Status Tracking', () => {
+  test('should handle rapid disconnect/reconnect', async () => {
     const ws1 = await createConnection();
     const { playerId } = await waitForMessage(ws1, 'connected');
 
     // Create room
-    ws1.send(JSON.stringify({
-      type: 'create_room',
-      roomName: 'Rapid Test',
-      hostName: 'Rapid Host',
-      settings: {
-        gameDuration: 300,
-        petrificusUses: 1,
-        spyUses: 2
-      }
-    }));
+    ws1.send(
+      JSON.stringify({
+        type: 'create_room',
+        roomName: 'Rapid Test',
+        hostName: 'Rapid Host',
+        settings: {
+          gameDuration: 300,
+          petrificusUses: 1,
+          spyUses: 2,
+        },
+      }),
+    );
 
     await waitForMessage(ws1, 'room_joined');
 
@@ -290,5 +304,109 @@ describe("Connection Status Tracking", () => {
     expect(reconnectedMsg.playerId).toBe(playerId);
 
     await closeConnection(ws2);
+  });
+});
+
+describe('Username Validation', () => {
+  test('should reject duplicate usernames in the same room', async () => {
+    // Host creates room
+    const wsHost = await createConnection();
+    await waitForMessage(wsHost, 'connected');
+    await waitForMessage(wsHost, 'room_list');
+
+    wsHost.send(
+      JSON.stringify({
+        type: 'create_room',
+        roomName: 'Username Test',
+        hostName: 'Alice',
+        settings: {
+          gameDuration: 300,
+          petrificusUses: 1,
+          spyUses: 2,
+        },
+      }),
+    );
+
+    const hostJoined = await waitForMessage(wsHost, 'room_joined');
+    const roomId = hostJoined.roomId;
+    await waitForMessage(wsHost, 'room_state');
+
+    // Player 2 tries to join with same name
+    const wsPlayer = await createConnection();
+    await waitForMessage(wsPlayer, 'connected');
+    await waitForMessage(wsPlayer, 'room_list');
+
+    wsPlayer.send(
+      JSON.stringify({
+        type: 'join_room',
+        roomId,
+        playerName: 'Alice', // Same name as host
+      }),
+    );
+
+    // Should receive error
+    const errorMsg = await waitForMessage(wsPlayer, 'error');
+    expect(errorMsg.message).toContain('already taken');
+
+    // Try with different name - should succeed
+    wsPlayer.send(
+      JSON.stringify({
+        type: 'join_room',
+        roomId,
+        playerName: 'Bob',
+      }),
+    );
+
+    const joinedMsg = await waitForMessage(wsPlayer, 'room_joined');
+    expect(joinedMsg.roomId).toBe(roomId);
+
+    // Cleanup
+    await closeConnection(wsHost);
+    await closeConnection(wsPlayer);
+  });
+
+  test('should reject duplicate usernames case-insensitively', async () => {
+    // Host creates room
+    const wsHost = await createConnection();
+    await waitForMessage(wsHost, 'connected');
+    await waitForMessage(wsHost, 'room_list');
+
+    wsHost.send(
+      JSON.stringify({
+        type: 'create_room',
+        roomName: 'Case Test',
+        hostName: 'Alice',
+        settings: {
+          gameDuration: 300,
+          petrificusUses: 1,
+          spyUses: 2,
+        },
+      }),
+    );
+
+    const hostJoined = await waitForMessage(wsHost, 'room_joined');
+    const roomId = hostJoined.roomId;
+    await waitForMessage(wsHost, 'room_state');
+
+    // Player tries to join with different case
+    const wsPlayer = await createConnection();
+    await waitForMessage(wsPlayer, 'connected');
+    await waitForMessage(wsPlayer, 'room_list');
+
+    wsPlayer.send(
+      JSON.stringify({
+        type: 'join_room',
+        roomId,
+        playerName: 'ALICE', // Different case
+      }),
+    );
+
+    // Should still be rejected
+    const errorMsg = await waitForMessage(wsPlayer, 'error');
+    expect(errorMsg.message).toContain('already taken');
+
+    // Cleanup
+    await closeConnection(wsHost);
+    await closeConnection(wsPlayer);
   });
 });

@@ -1,18 +1,17 @@
 // Game State Management
 
-import { getEmbedding, cosineSimilarity } from './embeddings';
+import { cosineSimilarity, getEmbedding } from './embeddings';
 import type {
-  Room,
-  Player,
-  Gift,
-  RoomSettings,
-  RoomInfo,
-  RoomStatePayload,
-  PlayerInfo,
-  GameStatePayload,
-  GiftState,
   GamePlayerState,
   GameResult,
+  GameStatePayload,
+  GiftState,
+  Player,
+  PlayerInfo,
+  Room,
+  RoomInfo,
+  RoomSettings,
+  RoomStatePayload,
 } from './types';
 
 // In-memory state
@@ -29,7 +28,9 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
 
-function calculatePlayerPositions(playerCount: number): { x: number; y: number }[] {
+function calculatePlayerPositions(
+  playerCount: number,
+): { x: number; y: number }[] {
   const positions: { x: number; y: number }[] = [];
   // Expand radius based on player count (more players = bigger circle)
   const radius = ARENA_RADIUS + Math.max(0, playerCount - 4) * 30;
@@ -48,7 +49,10 @@ function updatePlayerPositions(room: Room): void {
   const players = Array.from(room.players.values());
   const positions = calculatePlayerPositions(players.length);
   players.forEach((player, index) => {
-    player.position = positions[index];
+    const position = positions[index];
+    if (position) {
+      player.position = position;
+    }
   });
 }
 
@@ -61,7 +65,12 @@ function randomGiftPosition(): { x: number; y: number } {
   };
 }
 
-export function createRoom(hostId: string, hostName: string, roomName: string, settings: RoomSettings): Room {
+export function createRoom(
+  hostId: string,
+  hostName: string,
+  roomName: string,
+  settings: RoomSettings,
+): Room {
   const room: Room = {
     id: generateId(),
     name: roomName,
@@ -122,7 +131,7 @@ export function joinRoom(
   roomId: string,
   playerId: string,
   playerName: string,
-  ws: WebSocket
+  ws: unknown,
 ): { success: boolean; error?: string; room?: Room } {
   const room = rooms.get(roomId);
   if (!room) {
@@ -130,6 +139,14 @@ export function joinRoom(
   }
   if (room.phase !== 'waiting') {
     return { success: false, error: 'Game already started' };
+  }
+
+  // Check for duplicate username
+  const nameExists = Array.from(room.players.values()).some(
+    (p) => p.name.toLowerCase() === playerName.toLowerCase(),
+  );
+  if (nameExists) {
+    return { success: false, error: 'Username already taken in this room' };
   }
 
   const player: Player = {
@@ -170,14 +187,17 @@ export function leaveRoom(playerId: string): void {
     updatePlayerPositions(room);
     // If host left, assign new host
     if (room.hostId === playerId) {
-      room.hostId = room.players.keys().next().value!;
+      const newHostId = room.players.keys().next().value;
+      if (newHostId) {
+        room.hostId = newHostId;
+      }
     }
   }
 }
 
 export async function submitGift(
   playerId: string,
-  giftDescription: string
+  giftDescription: string,
 ): Promise<{ success: boolean; error?: string }> {
   const room = getRoomByPlayerId(playerId);
   if (!room) return { success: false, error: 'Not in a room' };
@@ -199,10 +219,13 @@ export function canStartGame(room: Room): boolean {
   return true;
 }
 
-export async function startGame(roomId: string): Promise<{ success: boolean; error?: string }> {
+export async function startGame(
+  roomId: string,
+): Promise<{ success: boolean; error?: string }> {
   const room = rooms.get(roomId);
   if (!room) return { success: false, error: 'Room not found' };
-  if (!canStartGame(room)) return { success: false, error: 'Not all players have submitted gifts' };
+  if (!canStartGame(room))
+    return { success: false, error: 'Not all players have submitted gifts' };
 
   // Create gifts from player submissions
   room.gifts = [];
@@ -226,7 +249,10 @@ export async function startGame(roomId: string): Promise<{ success: boolean; err
   return { success: true };
 }
 
-export async function updatePlayerGuess(playerId: string, guess: string): Promise<void> {
+export async function updatePlayerGuess(
+  playerId: string,
+  guess: string,
+): Promise<void> {
   const room = getRoomByPlayerId(playerId);
   if (!room || room.phase !== 'playing') return;
 
@@ -239,7 +265,7 @@ export async function updatePlayerGuess(playerId: string, guess: string): Promis
 
 export function usePetrificus(
   playerId: string,
-  giftId: string
+  giftId: string,
 ): { success: boolean; error?: string } {
   const room = getRoomByPlayerId(playerId);
   if (!room || room.phase !== 'playing') {
@@ -264,8 +290,13 @@ export function usePetrificus(
 
 export function useSpy(
   playerId: string,
-  targetPlayerId: string
-): { success: boolean; error?: string; targetGuess?: string; targetName?: string } {
+  targetPlayerId: string,
+): {
+  success: boolean;
+  error?: string;
+  targetGuess?: string;
+  targetName?: string;
+} {
   const room = getRoomByPlayerId(playerId);
   if (!room || room.phase !== 'playing') {
     return { success: false, error: 'Game not in progress' };
@@ -313,7 +344,10 @@ export function updateGiftPositions(room: Room, deltaTime: number): void {
       if (player.id === gift.ownerId) continue;
       if (!player.guessEmbedding) continue;
 
-      const similarity = cosineSimilarity(gift.embedding, player.guessEmbedding);
+      const similarity = cosineSimilarity(
+        gift.embedding,
+        player.guessEmbedding,
+      );
       if (similarity <= 0) continue;
 
       // Direction from gift to player
@@ -370,7 +404,8 @@ export function calculateResults(room: Room): GameResult[] {
       continue;
     }
 
-    const player = room.players.get(pair.playerId)!;
+    const player = room.players.get(pair.playerId);
+    if (!player) continue;
     const giftIndex = room.gifts.findIndex((g) => g.id === pair.giftId);
     const gift = room.gifts[giftIndex];
     if (!gift) continue;
@@ -433,13 +468,15 @@ export function getGameState(room: Room): GameStatePayload {
         : null,
   }));
 
-  const players: GamePlayerState[] = Array.from(room.players.values()).map((p) => ({
-    id: p.id,
-    name: p.name,
-    position: p.position,
-    petrificusRemaining: p.petrificusRemaining,
-    spyRemaining: p.spyRemaining,
-  }));
+  const players: GamePlayerState[] = Array.from(room.players.values()).map(
+    (p) => ({
+      id: p.id,
+      name: p.name,
+      position: p.position,
+      petrificusRemaining: p.petrificusRemaining,
+      spyRemaining: p.spyRemaining,
+    }),
+  );
 
   return { gifts, players, timeRemaining };
 }
@@ -470,7 +507,7 @@ export function markPlayerDisconnected(playerId: string): void {
   }
 }
 
-export function markPlayerConnected(playerId: string, ws: WebSocket): void {
+export function markPlayerConnected(playerId: string, ws: unknown): void {
   const room = getRoomByPlayerId(playerId);
   if (!room) return;
   const player = room.players.get(playerId);
@@ -481,12 +518,17 @@ export function markPlayerConnected(playerId: string, ws: WebSocket): void {
   }
 }
 
-export function cleanupDisconnectedPlayers(roomId: string, waitingTimeoutMs: number, playingTimeoutMs: number): string[] {
+export function cleanupDisconnectedPlayers(
+  roomId: string,
+  waitingTimeoutMs: number,
+  playingTimeoutMs: number,
+): string[] {
   const room = rooms.get(roomId);
   if (!room) return [];
 
   const now = Date.now();
-  const timeoutMs = room.phase === 'waiting' ? waitingTimeoutMs : playingTimeoutMs;
+  const timeoutMs =
+    room.phase === 'waiting' ? waitingTimeoutMs : playingTimeoutMs;
   const removedPlayerIds: string[] = [];
 
   for (const player of room.players.values()) {
@@ -508,8 +550,13 @@ export function cleanupDisconnectedPlayers(roomId: string, waitingTimeoutMs: num
     rooms.delete(roomId);
   } else if (removedPlayerIds.includes(room.hostId)) {
     // Reassign host to first remaining connected player, or any player
-    const connectedPlayer = Array.from(room.players.values()).find(p => p.connected);
-    room.hostId = connectedPlayer?.id || room.players.keys().next().value!;
+    const connectedPlayer = Array.from(room.players.values()).find(
+      (p) => p.connected,
+    );
+    const newHostId = connectedPlayer?.id || room.players.keys().next().value;
+    if (newHostId) {
+      room.hostId = newHostId;
+    }
     updatePlayerPositions(room);
   } else if (removedPlayerIds.length > 0) {
     updatePlayerPositions(room);
@@ -518,7 +565,10 @@ export function cleanupDisconnectedPlayers(roomId: string, waitingTimeoutMs: num
   return removedPlayerIds;
 }
 
-export function reconnectPlayer(oldPlayerId: string, newWs: WebSocket): { success: boolean; room?: Room } {
+export function reconnectPlayer(
+  oldPlayerId: string,
+  newWs: WebSocket,
+): { success: boolean; room?: Room } {
   const room = getRoomByPlayerId(oldPlayerId);
   if (!room) return { success: false };
 

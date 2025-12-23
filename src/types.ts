@@ -16,7 +16,7 @@ export interface Player {
   petrificusRemaining: number;
   spyRemaining: number;
   position: { x: number; y: number }; // position on circle
-  ws: WebSocket | null;
+  ws: unknown; // WebSocket reference (Bun ServerWebSocket or standard WebSocket)
   connected: boolean;
   disconnectedAt: number | null;
 }
@@ -46,7 +46,12 @@ export interface Room {
 
 export type ClientMessage =
   | { type: 'get_rooms' }
-  | { type: 'create_room'; roomName: string; hostName: string; settings: RoomSettings }
+  | {
+      type: 'create_room';
+      roomName: string;
+      hostName: string;
+      settings: RoomSettings;
+    }
   | { type: 'join_room'; roomId: string; playerName: string }
   | { type: 'leave_room' }
   | { type: 'submit_gift'; giftDescription: string }

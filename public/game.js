@@ -12,10 +12,22 @@ let isHost = false;
 let reconnectAttempts = 0;
 let reconnectTimeout = null;
 let isReconnecting = false;
-let maxReconnectDelay = 30000; // Max 30 seconds between retries
+const maxReconnectDelay = 30000; // Max 30 seconds between retries
 
 // Power modes
 let activePower = null; // 'petrificus' | 'spy' | null
+
+// Detect mobile for performance optimizations
+const isMobile =
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent,
+  );
+
+// Client-side interpolation for smooth gift movement (industry best practice)
+let stateBuffer = []; // Buffer of server states for smooth interpolation
+const renderDelay = isMobile ? 150 : 100; // Mobile needs bigger buffer for lag
+const lastRenderTime = Date.now();
+let renderAnimationId = null;
 
 // End game animation state
 let endGameResults = null;
@@ -40,24 +52,26 @@ const COLORS = {
   redLight: '#ef4444',
   redGlow: 'rgba(220, 38, 38, 0.3)',
   frozen: '#fecaca',
-  textMuted: '#8a7a7c'
+  textMuted: '#8a7a7c',
 };
 
 // Gift color combinations (box, ribbon) - candy cane inspired
 const GIFT_COLORS = [
-  { box: '#dc2626', ribbon: '#fff5f5' },  // Classic red + white
-  { box: '#fff5f5', ribbon: '#dc2626' },  // Inverted: white + red
-  { box: '#b91c1c', ribbon: '#fecaca' },  // Dark red + pink
-  { box: '#fecaca', ribbon: '#b91c1c' },  // Pink + dark red
-  { box: '#ef4444', ribbon: '#fff5f5' },  // Light red + white
-  { box: '#7f1d1d', ribbon: '#f87171' },  // Maroon + coral
-  { box: '#f87171', ribbon: '#7f1d1d' },  // Coral + maroon
-  { box: '#fca5a5', ribbon: '#991b1b' },  // Salmon + crimson
+  { box: '#dc2626', ribbon: '#fff5f5' }, // Classic red + white
+  { box: '#fff5f5', ribbon: '#dc2626' }, // Inverted: white + red
+  { box: '#b91c1c', ribbon: '#fecaca' }, // Dark red + pink
+  { box: '#fecaca', ribbon: '#b91c1c' }, // Pink + dark red
+  { box: '#ef4444', ribbon: '#fff5f5' }, // Light red + white
+  { box: '#7f1d1d', ribbon: '#f87171' }, // Maroon + coral
+  { box: '#f87171', ribbon: '#7f1d1d' }, // Coral + maroon
+  { box: '#fca5a5', ribbon: '#991b1b' }, // Salmon + crimson
 ];
 
 // Screen management
 function showScreen(screenId) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.screen').forEach((s) => {
+    s.classList.remove('active');
+  });
   document.getElementById(screenId).classList.add('active');
 
   if (screenId === 'game-screen') {
@@ -114,7 +128,10 @@ function scheduleReconnect() {
   reconnectAttempts++;
 
   // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
-  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts - 1), maxReconnectDelay);
+  const delay = Math.min(
+    1000 * 2 ** (reconnectAttempts - 1),
+    maxReconnectDelay,
+  );
 
   console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
   updateConnectionStatus('reconnecting');
@@ -191,13 +208,26 @@ function handleMessage(message) {
       }
       break;
 
-    case 'game_state':
+    case 'game_state': {
       // Don't update if we're animating the end
       if (isAnimatingEnd) break;
+
+      // Buffer server states for smooth interpolation (best practice)
+      stateBuffer.push({
+        state: message.state,
+        timestamp: Date.now(),
+      });
+
+      // Keep more states for mobile (laggy networks need bigger buffer)
+      const maxStates = isMobile ? 6 : 4;
+      while (stateBuffer.length > maxStates) {
+        stateBuffer.shift();
+      }
+
       gameState = message.state;
       updateGameUI();
-      renderGame();
       break;
+    }
 
     case 'spy_result':
       showSpyResult(message.targetName, message.targetGuess);
@@ -214,23 +244,65 @@ function handleMessage(message) {
   }
 }
 
-// Error display (no more alert!)
+// Error display with user-friendly toast
 function showError(message) {
-  // For now, console log - could add toast UI later
   console.error('Error:', message);
+
+  // Show error toast to user
+  const toast = document.createElement('div');
+  toast.className = 'error-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  // Fade in
+  setTimeout(() => toast.classList.add('show'), 10);
+
+  // Remove after 4 seconds
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
+// Success toast notification (for positive feedback)
+function showSuccessToast(message) {
+  const toast = document.createElement('div');
+  toast.className = 'success-toast';
+
+  // Add checkmark icon + message
+  toast.innerHTML = `
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style="flex-shrink: 0;">
+      <circle cx="10" cy="10" r="9" fill="currentColor" opacity="0.2"/>
+      <path d="M6 10l3 3 5-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>${message}</span>
+  `;
+  document.body.appendChild(toast);
+
+  // Fade in
+  setTimeout(() => toast.classList.add('show'), 10);
+
+  // Remove after 3 seconds
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
 
 // Room list
 function renderRoomList(rooms) {
   const container = document.getElementById('room-list');
-  const waitingRooms = rooms.filter(room => room.phase === 'waiting');
+  const waitingRooms = rooms.filter((room) => room.phase === 'waiting');
 
   if (waitingRooms.length === 0) {
-    container.innerHTML = '<p class="empty-state">No rooms yet.<br>Create one to get started!</p>';
+    container.innerHTML =
+      '<p class="empty-state">No rooms yet.<br>Create one to get started!</p>';
     return;
   }
 
-  container.innerHTML = waitingRooms.map(room => `
+  container.innerHTML = waitingRooms
+    .map(
+      (room) => `
     <div class="room-card">
       <div class="room-info">
         <h3>${escapeHtml(room.name)}</h3>
@@ -241,7 +313,9 @@ function renderRoomList(rooms) {
       </div>
       <button class="btn btn-primary" onclick="openJoinModal('${room.id}')">Join</button>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 }
 
 // Create room modal
@@ -250,8 +324,12 @@ document.getElementById('create-room-btn').addEventListener('click', () => {
   document.getElementById('host-name').focus();
 });
 
-document.getElementById('cancel-create').addEventListener('click', closeCreateModal);
-document.getElementById('close-create-modal').addEventListener('click', closeCreateModal);
+document
+  .getElementById('cancel-create')
+  .addEventListener('click', closeCreateModal);
+document
+  .getElementById('close-create-modal')
+  .addEventListener('click', closeCreateModal);
 
 function closeCreateModal() {
   document.getElementById('create-room-modal').classList.add('hidden');
@@ -263,8 +341,11 @@ document.getElementById('create-room-form').addEventListener('submit', (e) => {
 
   const hostName = document.getElementById('host-name').value.trim();
   const roomName = document.getElementById('room-name').value.trim();
-  const gameDuration = parseInt(document.getElementById('game-duration').value) * 60;
-  const petrificusUses = parseInt(document.getElementById('petrificus-uses').value);
+  const gameDuration =
+    parseInt(document.getElementById('game-duration').value) * 60;
+  const petrificusUses = parseInt(
+    document.getElementById('petrificus-uses').value,
+  );
   const spyUses = parseInt(document.getElementById('spy-uses').value);
 
   if (!hostName || !roomName) return;
@@ -274,7 +355,7 @@ document.getElementById('create-room-form').addEventListener('submit', (e) => {
     type: 'create_room',
     roomName,
     hostName,
-    settings: { gameDuration, petrificusUses, spyUses }
+    settings: { gameDuration, petrificusUses, spyUses },
   });
 
   closeCreateModal();
@@ -287,8 +368,12 @@ function openJoinModal(roomId) {
   document.getElementById('player-name').focus();
 }
 
-document.getElementById('cancel-join').addEventListener('click', closeJoinModal);
-document.getElementById('close-join-modal').addEventListener('click', closeJoinModal);
+document
+  .getElementById('cancel-join')
+  .addEventListener('click', closeJoinModal);
+document
+  .getElementById('close-join-modal')
+  .addEventListener('click', closeJoinModal);
 
 function closeJoinModal() {
   document.getElementById('join-room-modal').classList.add('hidden');
@@ -306,7 +391,7 @@ document.getElementById('join-room-form').addEventListener('submit', (e) => {
   send({
     type: 'join_room',
     roomId,
-    playerName
+    playerName,
   });
 
   closeJoinModal();
@@ -314,7 +399,12 @@ document.getElementById('join-room-form').addEventListener('submit', (e) => {
 
 // Get initials from name
 function getInitials(name) {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 // Waiting room
@@ -322,15 +412,16 @@ function renderWaitingRoom() {
   document.getElementById('waiting-room-name').textContent = currentRoom.name;
 
   const playersList = document.getElementById('players-list');
-  playersList.innerHTML = currentRoom.players.map(player => {
-    const isHostPlayer = player.id === currentRoom.hostId;
-    const isMe = player.id === playerId;
+  playersList.innerHTML = currentRoom.players
+    .map((player) => {
+      const isHostPlayer = player.id === currentRoom.hostId;
+      const isMe = player.id === playerId;
 
-    let badges = '';
-    if (isHostPlayer) badges += '<span class="player-badge host">Host</span>';
-    if (isMe) badges += '<span class="player-badge you">You</span>';
+      let badges = '';
+      if (isHostPlayer) badges += '<span class="player-badge host">Host</span>';
+      if (isMe) badges += '<span class="player-badge you">You</span>';
 
-    return `
+      return `
       <div class="player-card">
         <div class="player-info">
           <div class="player-avatar">${getInitials(player.name)}</div>
@@ -341,7 +432,8 @@ function renderWaitingRoom() {
         </span>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
   // Host controls
   const hostControls = document.getElementById('host-controls');
@@ -349,14 +441,16 @@ function renderWaitingRoom() {
 
   if (isHost) {
     hostControls.classList.remove('hidden');
-    const allReady = currentRoom.players.every(p => p.hasSubmittedGift);
+    const allReady = currentRoom.players.every((p) => p.hasSubmittedGift);
     const enoughPlayers = currentRoom.players.length >= 2;
     startBtn.disabled = !(allReady && enoughPlayers);
 
     if (!enoughPlayers) {
-      hostControls.querySelector('.hint').textContent = 'Need at least 2 players...';
+      hostControls.querySelector('.hint').textContent =
+        'Need at least 2 players...';
     } else if (!allReady) {
-      hostControls.querySelector('.hint').textContent = 'Waiting for all players to submit gifts...';
+      hostControls.querySelector('.hint').textContent =
+        'Waiting for all players to submit gifts...';
     } else {
       hostControls.querySelector('.hint').textContent = 'All players ready!';
     }
@@ -365,7 +459,7 @@ function renderWaitingRoom() {
   }
 
   // Check if current player has submitted
-  const myPlayer = currentRoom.players.find(p => p.id === playerId);
+  const myPlayer = currentRoom.players.find((p) => p.id === playerId);
   if (myPlayer && myPlayer.hasSubmittedGift) {
     document.getElementById('gift-form').classList.add('hidden');
     document.getElementById('gift-submitted').classList.remove('hidden');
@@ -379,12 +473,14 @@ function renderWaitingRoom() {
 document.getElementById('gift-form').addEventListener('submit', (e) => {
   e.preventDefault();
 
-  const giftDescription = document.getElementById('gift-description').value.trim();
+  const giftDescription = document
+    .getElementById('gift-description')
+    .value.trim();
   if (!giftDescription) return;
 
   send({
     type: 'submit_gift',
-    giftDescription
+    giftDescription,
   });
 });
 
@@ -415,8 +511,13 @@ function resizeCanvas() {
 
   // Get the #app container dimensions
   const app = document.getElementById('app');
-  canvas.width = app.clientWidth;
-  canvas.height = app.clientHeight - header.offsetHeight - guessContainer.offsetHeight;
+  const displayWidth = app.clientWidth;
+  const displayHeight =
+    app.clientHeight - header.offsetHeight - guessContainer.offsetHeight;
+
+  // Set canvas size (no DPR scaling - keep it simple for now)
+  canvas.width = displayWidth;
+  canvas.height = displayHeight;
 }
 
 function handleCanvasClick(e) {
@@ -452,7 +553,7 @@ function handlePowerClick(x, y) {
     for (const gift of gameState.gifts) {
       const dx = gift.position.x - gameX;
       const dy = gift.position.y - gameY;
-      if (Math.sqrt(dx*dx + dy*dy) < 30) {
+      if (Math.sqrt(dx * dx + dy * dy) < 30) {
         send({ type: 'use_petrificus', giftId: gift.id });
         activePower = null;
         updatePowerButtons();
@@ -465,7 +566,7 @@ function handlePowerClick(x, y) {
       if (player.id === playerId) continue;
       const dx = player.position.x - gameX;
       const dy = player.position.y - gameY;
-      if (Math.sqrt(dx*dx + dy*dy) < 40) {
+      if (Math.sqrt(dx * dx + dy * dy) < 40) {
         send({ type: 'use_spy', targetPlayerId: player.id });
         activePower = null;
         updatePowerButtons();
@@ -482,13 +583,15 @@ function getCanvasScale() {
   return {
     scale,
     offsetX: (canvas.width - gameWidth * scale) / 2,
-    offsetY: (canvas.height - gameHeight * scale) / 2
+    offsetY: (canvas.height - gameHeight * scale) / 2,
   };
 }
 
-function renderGame() {
-  if (!ctx || !gameState) return;
+// Render with a specific state (for interpolation)
+function renderGameWithState(state) {
+  if (!ctx || !state) return;
 
+  // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const { scale, offsetX, offsetY } = getCanvasScale();
@@ -513,7 +616,7 @@ function renderGame() {
   ctx.setLineDash([]);
 
   // Draw players
-  for (const player of gameState.players) {
+  for (const player of state.players) {
     const isMe = player.id === playerId;
 
     // Player circle
@@ -530,7 +633,11 @@ function renderGame() {
     ctx.font = 'bold 14px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(getInitials(player.name), player.position.x, player.position.y);
+    ctx.fillText(
+      getInitials(player.name),
+      player.position.x,
+      player.position.y,
+    );
 
     // Player name
     ctx.fillStyle = isMe ? COLORS.white : COLORS.whiteDim;
@@ -539,14 +646,18 @@ function renderGame() {
     ctx.fillText(player.name, player.position.x, player.position.y + 38);
   }
 
-  // Draw gifts
-  gameState.gifts.forEach((gift, index) => {
+  // Draw gifts with interpolated positions
+  state.gifts.forEach((gift, index) => {
     const isFrozen = gift.frozenSecondsLeft !== null;
     const colorScheme = GIFT_COLORS[index % GIFT_COLORS.length];
 
+    // Positions are already interpolated in getInterpolatedState()
+    const giftX = gift.position.x;
+    const giftY = gift.position.y;
+
     // Gift box
     ctx.beginPath();
-    ctx.rect(gift.position.x - 20, gift.position.y - 20, 40, 40);
+    ctx.rect(giftX - 20, giftY - 20, 40, 40);
     ctx.fillStyle = isFrozen ? COLORS.frozen : colorScheme.box;
     ctx.fill();
     ctx.strokeStyle = isFrozen ? COLORS.white : colorScheme.ribbon;
@@ -555,10 +666,10 @@ function renderGame() {
 
     // Gift ribbon
     ctx.beginPath();
-    ctx.moveTo(gift.position.x, gift.position.y - 20);
-    ctx.lineTo(gift.position.x, gift.position.y + 20);
-    ctx.moveTo(gift.position.x - 20, gift.position.y);
-    ctx.lineTo(gift.position.x + 20, gift.position.y);
+    ctx.moveTo(giftX, giftY - 20);
+    ctx.lineTo(giftX, giftY + 20);
+    ctx.moveTo(giftX - 20, giftY);
+    ctx.lineTo(giftX + 20, giftY);
     ctx.strokeStyle = isFrozen ? COLORS.white : colorScheme.ribbon;
     ctx.lineWidth = 4;
     ctx.stroke();
@@ -566,7 +677,7 @@ function renderGame() {
     // Bow
     ctx.fillStyle = isFrozen ? COLORS.white : colorScheme.ribbon;
     ctx.beginPath();
-    ctx.arc(gift.position.x, gift.position.y - 20, 8, 0, Math.PI * 2);
+    ctx.arc(giftX, giftY - 20, 8, 0, Math.PI * 2);
     ctx.fill();
 
     // Frozen timer
@@ -575,7 +686,7 @@ function renderGame() {
       ctx.font = 'bold 14px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(gift.frozenSecondsLeft + 's', gift.position.x, gift.position.y + 5);
+      ctx.fillText(gift.frozenSecondsLeft + 's', giftX, giftY + 5);
     }
   });
 
@@ -589,17 +700,160 @@ function renderGame() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillText(
-      activePower === 'petrificus' ? 'Tap a gift to freeze it!' : 'Tap a player to spy!',
-      400, 30
+      activePower === 'petrificus'
+        ? 'Tap a gift to freeze it!'
+        : 'Tap a player to spy!',
+      400,
+      30,
     );
   }
 
   ctx.restore();
 }
 
+// Legacy renderGame function (calls new version with current state)
+function renderGame() {
+  if (gameState) {
+    renderGameWithState(gameState);
+  }
+}
+
+// Linear interpolation helper
+function lerp(start, end, t) {
+  return start + (end - start) * Math.max(0, Math.min(1, t));
+}
+
+// Get interpolated state using entity interpolation (OPTIMIZED - no deep clone!)
+function getInterpolatedState() {
+  if (stateBuffer.length < 1) {
+    return gameState;
+  }
+
+  // Only one state? Use it directly (no interpolation possible)
+  if (stateBuffer.length === 1) {
+    return stateBuffer[0].state;
+  }
+
+  const now = Date.now();
+  const renderTime = now - renderDelay;
+
+  // Find the two states to interpolate between
+  let state0 = null;
+  let state1 = null;
+  let t = 0;
+
+  // Check if renderTime is BEFORE all states (buffer just started)
+  if (renderTime < stateBuffer[0].timestamp) {
+    // Use first two states, clamped to t=0
+    state0 = stateBuffer[0];
+    state1 = stateBuffer[1];
+    t = 0;
+  }
+  // Check if renderTime is AFTER all states (lag spike or fast client)
+  else if (renderTime > stateBuffer[stateBuffer.length - 1].timestamp) {
+    // Use last two states, but DON'T extrapolate - just hold at latest
+    state0 = stateBuffer[stateBuffer.length - 2];
+    state1 = stateBuffer[stateBuffer.length - 1];
+    t = 1; // Hold at end position (no extrapolation to avoid jumps)
+  }
+  // Normal case: renderTime is between two states
+  else {
+    for (let i = 0; i < stateBuffer.length - 1; i++) {
+      if (
+        stateBuffer[i].timestamp <= renderTime &&
+        renderTime <= stateBuffer[i + 1].timestamp
+      ) {
+        state0 = stateBuffer[i];
+        state1 = stateBuffer[i + 1];
+        const dt = state1.timestamp - state0.timestamp;
+        t = dt > 0 ? (renderTime - state0.timestamp) / dt : 0;
+        break;
+      }
+    }
+  }
+
+  // Safety fallback (should never happen)
+  if (!state0 || !state1) {
+    return stateBuffer[stateBuffer.length - 1].state;
+  }
+
+  // OPTIMIZED: Build interpolated state manually (no JSON.parse/stringify!)
+  // This is ~10x faster than deep cloning
+  const interpolatedState = {
+    gifts: [],
+    players: state1.state.players, // Players don't move, reuse reference
+    timeRemaining: state1.state.timeRemaining,
+  };
+
+  // Interpolate only gift positions (the moving objects)
+  const gifts0 = state0.state.gifts;
+  const gifts1 = state1.state.gifts;
+
+  // Build a map of gifts from state0 for O(1) lookup by ID
+  const gifts0Map = new Map();
+  for (const gift of gifts0) {
+    gifts0Map.set(gift.id, gift);
+  }
+
+  // Interpolate each gift from state1
+  for (const gift1 of gifts1) {
+    const gift0 = gifts0Map.get(gift1.id);
+
+    if (gift0) {
+      // Gift exists in both states - interpolate position
+      interpolatedState.gifts.push({
+        id: gift1.id,
+        position: {
+          x: lerp(gift0.position.x, gift1.position.x, t),
+          y: lerp(gift0.position.y, gift1.position.y, t),
+        },
+        frozenSecondsLeft: gift1.frozenSecondsLeft,
+      });
+    } else {
+      // New gift appeared - use current position (no interpolation)
+      interpolatedState.gifts.push(gift1);
+    }
+  }
+
+  return interpolatedState;
+}
+
+// Smooth rendering loop using requestAnimationFrame
+// Mobile: 30fps to reduce CPU load, Desktop: 60fps
+let frameSkip = 0;
+function smoothRenderLoop() {
+  if (!gameState || stateBuffer.length === 0) {
+    renderAnimationId = requestAnimationFrame(smoothRenderLoop);
+    return;
+  }
+
+  // On mobile, render at 30fps instead of 60fps to save battery/CPU
+  if (isMobile) {
+    frameSkip++;
+    if (frameSkip % 2 !== 0) {
+      renderAnimationId = requestAnimationFrame(smoothRenderLoop);
+      return;
+    }
+  }
+
+  // Get interpolated state for smooth movement
+  const interpolatedState = getInterpolatedState();
+
+  // Render with interpolated positions
+  renderGameWithState(interpolatedState);
+
+  // Continue animation loop
+  renderAnimationId = requestAnimationFrame(smoothRenderLoop);
+}
+
 // Game UI updates
 function updateGameUI() {
   if (!gameState) return;
+
+  // Start smooth rendering loop if not already running
+  if (!renderAnimationId) {
+    smoothRenderLoop();
+  }
 
   // Timer
   const minutes = Math.floor(gameState.timeRemaining / 60);
@@ -616,12 +870,14 @@ function updateGameUI() {
   }
 
   // Powers
-  const myPlayer = gameState.players.find(p => p.id === playerId);
+  const myPlayer = gameState.players.find((p) => p.id === playerId);
   if (myPlayer) {
-    document.getElementById('petrificus-count').textContent = myPlayer.petrificusRemaining;
+    document.getElementById('petrificus-count').textContent =
+      myPlayer.petrificusRemaining;
     document.getElementById('spy-count').textContent = myPlayer.spyRemaining;
 
-    document.getElementById('petrificus-btn').disabled = myPlayer.petrificusRemaining === 0;
+    document.getElementById('petrificus-btn').disabled =
+      myPlayer.petrificusRemaining === 0;
     document.getElementById('spy-btn').disabled = myPlayer.spyRemaining === 0;
   }
 
@@ -629,8 +885,12 @@ function updateGameUI() {
 }
 
 function updatePowerButtons() {
-  document.getElementById('petrificus-btn').classList.toggle('active', activePower === 'petrificus');
-  document.getElementById('spy-btn').classList.toggle('active', activePower === 'spy');
+  document
+    .getElementById('petrificus-btn')
+    .classList.toggle('active', activePower === 'petrificus');
+  document
+    .getElementById('spy-btn')
+    .classList.toggle('active', activePower === 'spy');
 }
 
 // Power buttons
@@ -658,10 +918,19 @@ function submitGuess() {
   const guess = input.value.trim();
   if (guess) {
     send({ type: 'update_guess', guess });
+
+    // Show success feedback to user
+    showSuccessToast('Guess submitted!');
+
+    // Clear input and blur to dismiss mobile keyboard
+    input.value = '';
+    input.blur();
   }
 }
 
-document.getElementById('guess-submit-btn').addEventListener('click', submitGuess);
+document
+  .getElementById('guess-submit-btn')
+  .addEventListener('click', submitGuess);
 
 document.getElementById('guess-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
@@ -673,7 +942,8 @@ document.getElementById('guess-input').addEventListener('keydown', (e) => {
 // Spy modal
 function showSpyResult(targetName, targetGuess) {
   document.getElementById('spy-target-name').textContent = targetName;
-  document.getElementById('spy-target-guess').textContent = targetGuess || '(no guess yet)';
+  document.getElementById('spy-target-guess').textContent =
+    targetGuess || '(no guess yet)';
   document.getElementById('spy-modal').classList.remove('hidden');
 }
 
@@ -756,9 +1026,10 @@ function showGiftToast(result) {
 
   playerNameEl.textContent = result.playerName;
   // Truncate gift description if too long
-  const desc = result.giftDescription.length > 60
-    ? result.giftDescription.slice(0, 57) + '...'
-    : result.giftDescription;
+  const desc =
+    result.giftDescription.length > 60
+      ? result.giftDescription.slice(0, 57) + '...'
+      : result.giftDescription;
   giftDescEl.textContent = `"${desc}"`;
 
   toast.classList.remove('hidden');
@@ -791,7 +1062,13 @@ function renderEndGameAnimation() {
     const isMe = result.playerId === playerId;
 
     ctx.beginPath();
-    ctx.arc(result.playerPosition.x, result.playerPosition.y, 30, 0, Math.PI * 2);
+    ctx.arc(
+      result.playerPosition.x,
+      result.playerPosition.y,
+      30,
+      0,
+      Math.PI * 2,
+    );
     ctx.fillStyle = isMe ? COLORS.red : COLORS.bgSurface;
     ctx.fill();
     ctx.strokeStyle = isMe ? COLORS.redLight : COLORS.border;
@@ -802,12 +1079,20 @@ function renderEndGameAnimation() {
     ctx.font = 'bold 14px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(getInitials(result.playerName), result.playerPosition.x, result.playerPosition.y);
+    ctx.fillText(
+      getInitials(result.playerName),
+      result.playerPosition.x,
+      result.playerPosition.y,
+    );
 
     ctx.fillStyle = isMe ? COLORS.white : COLORS.whiteDim;
     ctx.font = '12px -apple-system, sans-serif';
     ctx.textBaseline = 'top';
-    ctx.fillText(result.playerName, result.playerPosition.x, result.playerPosition.y + 38);
+    ctx.fillText(
+      result.playerName,
+      result.playerPosition.x,
+      result.playerPosition.y + 38,
+    );
   }
 
   // Draw gifts - completed ones at their player, current one animating, rest at original position
@@ -824,8 +1109,12 @@ function renderEndGameAnimation() {
     } else if (i === animatingGiftIndex) {
       // Currently animating - interpolate with acceleration (ease-in)
       const eased = easeInCubic(giftAnimationProgress);
-      giftX = result.giftPosition.x + (result.playerPosition.x - result.giftPosition.x) * eased;
-      giftY = result.giftPosition.y + (result.playerPosition.y - result.giftPosition.y) * eased;
+      giftX =
+        result.giftPosition.x +
+        (result.playerPosition.x - result.giftPosition.x) * eased;
+      giftY =
+        result.giftPosition.y +
+        (result.playerPosition.y - result.giftPosition.y) * eased;
     } else {
       // Not yet animated - at original position
       giftX = result.giftPosition.x;
@@ -892,16 +1181,18 @@ function showResultsModal(results) {
   }
 
   const container = document.getElementById('results-modal-list');
-  container.innerHTML = results.map(result => {
-    const isMe = result.playerId === playerId;
-    return `
+  container.innerHTML = results
+    .map((result) => {
+      const isMe = result.playerId === playerId;
+      return `
       <div class="result-card ${isMe ? 'is-you' : ''}">
         <div class="player-name">${escapeHtml(result.playerName)}${isMe ? ' (You)' : ''}</div>
         <div class="gift-desc">"${escapeHtml(result.giftDescription)}"</div>
         <div class="gift-from">From: ${escapeHtml(result.giftOwnerName)}</div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
   document.getElementById('results-modal').classList.remove('hidden');
 }
@@ -928,6 +1219,13 @@ function leaveRoom() {
   hideResultsModal();
   hideGiftToast();
 
+  // Stop rendering loop
+  if (renderAnimationId) {
+    cancelAnimationFrame(renderAnimationId);
+    renderAnimationId = null;
+  }
+  stateBuffer = [];
+
   // Reset guess container display
   const guessContainer = document.querySelector('.guess-container');
   if (guessContainer) guessContainer.style.display = '';
@@ -936,10 +1234,14 @@ function leaveRoom() {
 }
 
 // Leave room from results modal
-document.getElementById('leave-room-btn-modal').addEventListener('click', leaveRoom);
+document
+  .getElementById('leave-room-btn-modal')
+  .addEventListener('click', leaveRoom);
 
 // Legacy results screen button (kept for compatibility)
-document.getElementById('back-to-lobby-btn').addEventListener('click', leaveRoom);
+document
+  .getElementById('back-to-lobby-btn')
+  .addEventListener('click', leaveRoom);
 
 // Utility
 function escapeHtml(text) {

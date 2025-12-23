@@ -20,7 +20,7 @@ export async function getEmbedding(text: string): Promise<number[]> {
       return new Array(1024).fill(0);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as { embedding: number[] };
     return data.embedding;
   } catch (error) {
     console.error('Failed to get embedding:', error);
@@ -36,9 +36,12 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   let normB = 0;
 
   for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+    const aVal = a[i];
+    const bVal = b[i];
+    if (aVal === undefined || bVal === undefined) continue;
+    dotProduct += aVal * bVal;
+    normA += aVal * aVal;
+    normB += bVal * bVal;
   }
 
   normA = Math.sqrt(normA);
